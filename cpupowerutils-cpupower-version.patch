@@ -1,0 +1,12 @@
+diff -up ./cpupower/Makefile.orig ./cpupower/Makefile
+--- ./cpupower/Makefile.orig	2013-03-01 14:47:02.572944004 -0500
++++ ./cpupower/Makefile	2013-03-01 14:47:12.820233813 -0500
+@@ -57,7 +57,7 @@ DESTDIR ?=
+ # Package-related definitions. Distributions can modify the version
+ # and _should_ modify the PACKAGE_BUGREPORT definition
+ 
+-VERSION=			$(shell ./utils/version-gen.sh)
++VERSION=			2.6.32
+ LIB_MAJ=			0.0.0
+ LIB_MIN=			0
+ 

@@ -1,0 +1,59 @@
+@@ -, +, @@ 
+    more useful usage text for x86_energy_perf_policy
+--- a/x86/x86_energy_perf_policy/x86_energy_perf_policy.c	
++++ a/x86/x86_energy_perf_policy/x86_energy_perf_policy.c	
+@@ -37,6 +37,12 @@ char *progname;
+ unsigned long long new_bias;
+ int cpu = -1;
+ 
++#define MSR_IA32_ENERGY_PERF_BIAS	0x000001b0
++
++#define	BIAS_PERFORMANCE		0
++#define BIAS_BALANCE			6
++#define	BIAS_POWERSAVE			15
++
+ /*
+  * Usage:
+  *
+@@ -64,24 +70,25 @@ int cpu = -1;
+ void usage(void)
+ {
+ 	printf("%s: [-c cpu] [-v] "
+-		"(-r | 'performance' | 'normal' | 'powersave' | n)\n",
++		"(-r | 'performance' | 'normal' | 'powersave' | N)\n",
+ 		progname);
++	printf("\t-c cpu limits action to single CPU (default is all CPUs)\n");
++	printf("\t-v verbose output\n");
++	printf("\t-r read-only\n");
++	printf("\tperformance runs full speed, but no energy savings\n");
++	printf("\tnormal can tolerate minor performance loss to save energy\n");
++	printf("\tpowersave maximizes energy savings, but with signficant performance loss\n");
++	printf("\tN a numerical value in range [%d-%d] to write to the underlying MSR\n", BIAS_PERFORMANCE, BIAS_POWERSAVE);
+ 	exit(1);
+ }
+ 
+-#define MSR_IA32_ENERGY_PERF_BIAS	0x000001b0
+-
+-#define	BIAS_PERFORMANCE		0
+-#define BIAS_BALANCE			6
+-#define	BIAS_POWERSAVE			15
+-
+ void cmdline(int argc, char **argv)
+ {
+ 	int opt;
+ 
+ 	progname = argv[0];
+ 
+-	while ((opt = getopt(argc, argv, "+rvc:")) != -1) {
++	while ((opt = getopt(argc, argv, "+rvc:h")) != -1) {
+ 		switch (opt) {
+ 		case 'c':
+ 			cpu = atoi(optarg);
+@@ -92,6 +99,7 @@ void cmdline(int argc, char **argv)
+ 		case 'v':
+ 			verbose++;
+ 			break;
++		case 'h':
+ 		default:
+ 			usage();
+ 		}

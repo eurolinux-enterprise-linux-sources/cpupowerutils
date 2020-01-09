@@ -1,0 +1,72 @@
+diff -up ./x86/turbostat/turbostat.c.orig ./x86/turbostat/turbostat.c
+--- ./x86/turbostat/turbostat.c.orig	2014-04-09 11:32:50.062157643 -0400
++++ ./x86/turbostat/turbostat.c	2014-04-09 11:33:51.693905302 -0400
+@@ -40,6 +40,18 @@
+ #define MSR_IA32_POWER_CTL              0x000001fc
+ #endif
+ 
++#ifndef MSR_PKG_C8_RESIDENCY
++#define MSR_PKG_C8_RESIDENCY           0x00000630
++#endif
++
++#ifndef MSR_PKG_C9_RESIDENCY
++#define MSR_PKG_C9_RESIDENCY           0x00000631
++#endif
++
++#ifndef MSR_PKG_C10_RESIDENCY
++#define MSR_PKG_C10_RESIDENCY          0x00000632
++#endif
++
+ char *proc_stat = "/proc/stat";
+ unsigned int interval_sec = 5;	/* set with -i interval_sec */
+ unsigned int verbose;		/* set with -v */
+@@ -219,7 +231,7 @@ int cpu_migrate(int cpu)
+ 		return 0;
+ }
+ 
+-int get_msr(int cpu, off_t offset, unsigned long long *msr)
++int _get_msr(int cpu, off_t offset, unsigned long long *msr, int warn)
+ {
+ 	ssize_t retval;
+ 	char pathname[32];
+@@ -234,13 +246,25 @@ int get_msr(int cpu, off_t offset, unsig
+ 	close(fd);
+ 
+ 	if (retval != sizeof *msr) {
+-		fprintf(stderr, "%s offset 0x%zx read failed\n", pathname, offset);
++		if (warn)
++			fprintf(stderr, "%s offset 0x%zx read failed\n",
++				pathname, offset);
+ 		return -1;
+ 	}
+ 
+ 	return 0;
+ }
+ 
++int get_msr(int cpu, off_t offset, unsigned long long *msr)
++{
++	return _get_msr(cpu, offset, msr, 1);
++}
++
++int get_msr_nowarn(int cpu, off_t offset, unsigned long long *msr)
++{
++	return _get_msr(cpu, offset, msr, 0);
++}
++
+ void print_header(void)
+ {
+ 	if (show_pkg)
+@@ -938,9 +962,10 @@ int get_counters(struct thread_data *t,
+ 		p->energy_dram = msr & 0xFFFFFFFF;
+ 	}
+ 	if (do_rapl & RAPL_GFX) {
+-		if (get_msr(cpu, MSR_PP1_ENERGY_STATUS, &msr))
+-			return -16;
+-		p->energy_gfx = msr & 0xFFFFFFFF;
++		if (get_msr_nowarn(cpu, MSR_PP1_ENERGY_STATUS, &msr))
++			do_rapl &= ~RAPL_GFX; /* unsupported on servers */
++		else
++			p->energy_gfx = msr & 0xFFFFFFFF;
+ 	}
+ 	if (do_rapl & RAPL_PKG_PERF_STATUS) {
+ 		if (get_msr(cpu, MSR_PKG_PERF_STATUS, &msr))

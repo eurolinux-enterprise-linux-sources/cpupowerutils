@@ -1,0 +1,16 @@
+@@ -, +, @@ 
+    exit from x86_energy_perf_policy if non-root
+--- a/x86/x86_energy_perf_policy/x86_energy_perf_policy.c	
++++ a/x86/x86_energy_perf_policy/x86_energy_perf_policy.c	
+@@ -298,6 +298,11 @@ void for_every_cpu(void (func)(int))
+ 
+ int main(int argc, char **argv)
+ {
++	if (getuid() != 0) {
++		fprintf(stderr, "must be root\n");
++		exit(EXIT_FAILURE);
++	}
++
+ 	cmdline(argc, argv);
+ 
+ 	if (verbose > 1)
