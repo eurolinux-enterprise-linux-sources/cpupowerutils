@@ -1,6 +1,6 @@
 Name:		cpupowerutils
 Version:	1.3
-Release:	1%{?dist}
+Release:	2%{?dist}
 Summary:	CPU power management utilities	
 Group:		System Environment/Base
 License:	GPLv2
@@ -37,6 +37,7 @@ Patch13: cpupowerutils-turbostat-manpage-update.patch
 Patch14: cpupowerutils-update-to-e98f033f94.patch 
 Patch15: cpupowerutils-turbostat-temp-MSR.patch
 Patch16: uint-max.patch
+Patch17: cpupowerutils-turbostat-purley-support.patch
 
 %description devel
 Header files and libraries to enable development of cpupower utities
@@ -61,6 +62,7 @@ Header files and libraries to enable development of cpupower utities
 %patch14 -p1 
 %patch15 -p1
 %patch16 -p1
+%patch17 -p1
 
 %build
 make -C cpupower
@@ -99,6 +101,9 @@ rm -rf %{buildroot}
 %{_libdir}/libcpupower.so
 
 %changelog
+* Mon Aug 08 2016 Neil Horman <nhorman@redhat.com> - 1.3-2
+- Added Purley support (bz 1348863)
+
 * Tue Jan 19 2016 Jacob Tanenbaum <jtanenba@redhat.com> - 1.3-1
 - Updated package to upstream commit 98f033f94 (bz1283648)
 
