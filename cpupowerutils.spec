@@ -1,6 +1,6 @@
 Name:		cpupowerutils
 Version:	1.2
-Release:	5%{?dist}
+Release:	7%{?dist}
 Summary:	CPU power management utilities	
 Group:		System Environment/Base
 License:	GPLv2
@@ -31,6 +31,8 @@ Patch7: cpupowerutils-turbostat-energystatus.patch
 Patch8: cpupowerutils-turbostat-rapl-fix.patch
 Patch9: cpupowerutils-freq-rounding.patch
 Patch10: cpupowerutils-turbostat-broadwell-support.patch
+Patch11: cpupowerutils-turbostat-rhel7-sync.patch
+Patch12: cpupowerutils-skl.patch
 
 %description devel
 Header files and libraries to enable development of cpupower utities
@@ -48,6 +50,11 @@ Header files and libraries to enable development of cpupower utities
 %patch8 -p1
 %patch9 -p1
 %patch10 -p1
+# This brings us to commit e7c95ff32d0
+%patch11 -p1 
+%patch12 -p1
+
+
 
 %build
 make -C cpupower
@@ -86,6 +93,12 @@ rm -rf %{buildroot}
 %{_libdir}/libcpupower.so
 
 %changelog
+* Fri May 22 2015 Neil Horman <nhorman@redhat.com> - 1.2-7
+- Add skylake support
+
+* Mon Apr 27 2015 Neil Horman <nhorman@redhat.com> - 1.2-6
+- Updating turbostat to latest RHEL7 levels (bz1187332)
+
 * Fri Jun 27 2014 Neil Horman <nhorman@redhat.com>  1.2-5
 - Added Broadwell support (bz 1093513)
 
