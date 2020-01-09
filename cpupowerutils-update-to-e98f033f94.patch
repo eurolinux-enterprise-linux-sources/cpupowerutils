@@ -1,0 +1,2280 @@
+diff -ur power-old/cpupower/bench/Makefile power/cpupower/bench/Makefile
+--- power-old/cpupower/bench/Makefile	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/bench/Makefile	2016-01-14 13:59:07.697398577 -0500
+@@ -5,9 +5,15 @@
+ endif
+ endif
+ 
++ifeq ($(strip $(STATIC)),true)
++LIBS = -L../ -L$(OUTPUT) -lm
++OBJS = $(OUTPUT)main.o $(OUTPUT)parse.o $(OUTPUT)system.o $(OUTPUT)benchmark.o \
++       $(OUTPUT)../lib/cpufreq.o $(OUTPUT)../lib/sysfs.o
++else
+ LIBS = -L../ -L$(OUTPUT) -lm -lcpupower
+-
+ OBJS = $(OUTPUT)main.o $(OUTPUT)parse.o $(OUTPUT)system.o $(OUTPUT)benchmark.o
++endif
++
+ CFLAGS += -D_GNU_SOURCE -I../lib -DDEFAULT_CONFIG_FILE=\"$(confdir)/cpufreq-bench.conf\"
+ 
+ $(OUTPUT)%.o : %.c
+diff -ur power-old/cpupower/bench/parse.c power/cpupower/bench/parse.c
+--- power-old/cpupower/bench/parse.c	2016-01-14 12:45:15.847517673 -0500
++++ power/cpupower/bench/parse.c	2016-01-14 13:59:07.623393876 -0500
+@@ -158,8 +158,8 @@
+ int prepare_config(const char *path, struct config *config)
+ {
+ 	size_t len = 0;
+-	char *opt, *val, *line = NULL;
+-	FILE *configfile = fopen(path, "r");
++	char opt[16], val[32], *line = NULL;
++	FILE *configfile;
+ 	int rc = 1;
+ 
+ 	if (config == NULL) {
+@@ -167,6 +167,7 @@
+ 		goto out;
+ 	}
+ 
++	configfile = fopen(path, "r");
+ 	if (configfile == NULL) {
+ 		perror("fopen");
+ 		fprintf(stderr, "error: unable to read configfile\n");
+@@ -175,35 +176,36 @@
+ 	}
+ 
+ 	while (getline(&line, &len, configfile) != -1) {
+-		if (line[0] == '#' || line[0] == ' ')
++		if (line[0] == '#' || line[0] == ' ' || line[0] == '\n')
+ 			continue;
+ 
+-		sscanf(line, "%as = %as", &opt, &val);
++		if (sscanf(line, "%14s = %30s", opt, val) < 2)
++			continue;
+ 
+ 		dprintf("parsing: %s -> %s\n", opt, val);
+ 
+-		if (strncmp("sleep", opt, strlen(opt)) == 0)
++		if (strcmp("sleep", opt) == 0)
+ 			sscanf(val, "%li", &config->sleep);
+ 
+-		else if (strncmp("load", opt, strlen(opt)) == 0)
++		else if (strcmp("load", opt) == 0)
+ 			sscanf(val, "%li", &config->load);
+ 
+-		else if (strncmp("load_step", opt, strlen(opt)) == 0)
++		else if (strcmp("load_step", opt) == 0)
+ 			sscanf(val, "%li", &config->load_step);
+ 
+-		else if (strncmp("sleep_step", opt, strlen(opt)) == 0)
++		else if (strcmp("sleep_step", opt) == 0)
+ 			sscanf(val, "%li", &config->sleep_step);
+ 
+-		else if (strncmp("cycles", opt, strlen(opt)) == 0)
++		else if (strcmp("cycles", opt) == 0)
+ 			sscanf(val, "%u", &config->cycles);
+ 
+-		else if (strncmp("rounds", opt, strlen(opt)) == 0)
++		else if (strcmp("rounds", opt) == 0)
+ 			sscanf(val, "%u", &config->rounds);
+ 
+-		else if (strncmp("verbose", opt, strlen(opt)) == 0)
++		else if (strcmp("verbose", opt) == 0)
+ 			sscanf(val, "%u", &config->verbose);
+ 
+-		else if (strncmp("output", opt, strlen(opt)) == 0) {
++		else if (strcmp("output", opt) == 0) {
+ 			config->output = prepare_output(val); 
+ 			if (!config->output) {
+ 				rc = 1;
+@@ -211,13 +213,16 @@
+ 			}
+ 		}
+ 
+-		else if (strncmp("cpu", opt, strlen(opt)) == 0)
++		else if (strcmp("cpu", opt) == 0)
+ 			sscanf(val, "%u", &config->cpu);
+ 
+-		else if (strncmp("governor", opt, 14) == 0)
+-			strncpy(config->governor, val, 14);
++		else if (strcmp("governor", opt) == 0) {
++			strncpy(config->governor, val,
++					sizeof(config->governor));
++			config->governor[sizeof(config->governor) - 1] = '\0';
++		}
+ 
+-		else if (strncmp("priority", opt, strlen(opt)) == 0) {
++		else if (strcmp("priority", opt)) {
+ 			if (string_to_prio(val) != SCHED_ERR)
+ 				config->prio = string_to_prio(val);
+ 		}
+@@ -227,8 +232,6 @@
+ 	if (rc && config->output && config->output != stdout)
+ 		fclose(config->output);
+ 	free(line);
+-	free(opt);
+-	free(val);
+ 
+ out:
+ 	return rc;
+diff -ur power-old/cpupower/debug/kernel/cpufreq-test_tsc.c power/cpupower/debug/kernel/cpufreq-test_tsc.c
+--- power-old/cpupower/debug/kernel/cpufreq-test_tsc.c	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/debug/kernel/cpufreq-test_tsc.c	2016-01-14 13:59:07.648395217 -0500
+@@ -84,11 +84,11 @@
+ 
+ 	printk(KERN_DEBUG "start--> \n");
+ 	then = read_pmtmr();
+-        rdtscll(then_tsc);
++	then_tsc = rdtsc();
+ 	for (i=0;i<20;i++) {
+ 		mdelay(100);
+ 		now = read_pmtmr();
+-		rdtscll(now_tsc);
++		now_tsc = rdtsc();
+ 		diff = (now - then) & 0xFFFFFF;
+ 		diff_tsc = now_tsc - then_tsc;
+ 		printk(KERN_DEBUG "t1: %08u t2: %08u diff_pmtmr: %08u diff_tsc: %016llu\n", then, now, diff, diff_tsc);
+diff -ur power-old/cpupower/Makefile power/cpupower/Makefile
+--- power-old/cpupower/Makefile	2016-01-14 12:45:15.849517688 -0500
++++ power/cpupower/Makefile	2016-01-14 13:59:07.696398509 -0500
+@@ -47,6 +47,11 @@
+ # cpufreq-bench benchmarking tool
+ CPUFREQ_BENCH ?= true
+ 
++# Do not build libraries, but build the code in statically
++# Libraries are still built, otherwise the Makefile code would
++# be rather ugly.
++export STATIC ?= false
++
+ # Prefix to the directories we're installing to
+ DESTDIR ?=
+ 
+@@ -131,7 +136,8 @@
+ 	utils/idle_monitor/amd_fam14h_idle.o utils/idle_monitor/cpuidle_sysfs.o \
+ 	utils/idle_monitor/mperf_monitor.o utils/idle_monitor/cpupower-monitor.o \
+ 	utils/cpupower.o utils/cpufreq-info.o utils/cpufreq-set.o \
+-	utils/cpupower-set.o utils/cpupower-info.o utils/cpuidle-info.o
++	utils/cpupower-set.o utils/cpupower-info.o utils/cpuidle-info.o \
++	utils/cpuidle-set.o
+ 
+ UTIL_SRC := $(UTIL_OBJS:.o=.c)
+ 
+@@ -159,6 +165,12 @@
+ 	COMPILE_BENCH += compile-bench
+ endif
+ 
++ifeq ($(strip $(STATIC)),true)
++        UTIL_OBJS += $(LIB_OBJS)
++        UTIL_HEADERS += $(LIB_HEADERS)
++        UTIL_SRC += $(LIB_SRC)
++endif
++
+ CFLAGS += $(WARNINGS)
+ 
+ ifeq ($(strip $(V)),false)
+@@ -207,7 +219,11 @@
+ 
+ $(OUTPUT)cpupower: $(UTIL_OBJS) $(OUTPUT)libcpupower.so.$(LIB_MAJ)
+ 	$(ECHO) "  CC      " $@
++ifeq ($(strip $(STATIC)),true)
++	$(QUIET) $(CC) $(CFLAGS) $(LDFLAGS) $(UTIL_OBJS) -lrt -lpci -L$(OUTPUT) -o $@
++else
+ 	$(QUIET) $(CC) $(CFLAGS) $(LDFLAGS) $(UTIL_OBJS) -lcpupower -lrt -lpci -L$(OUTPUT) -o $@
++endif
+ 	$(QUIET) $(STRIPCMD) $@
+ 
+ $(OUTPUT)po/$(PACKAGE).pot: $(UTIL_SRC)
+@@ -286,7 +302,11 @@
+ 	@#DESTDIR must be set from outside to survive
+ 	@sbindir=$(sbindir) bindir=$(bindir) docdir=$(docdir) confdir=$(confdir) $(MAKE) -C bench O=$(OUTPUT) install
+ 
++ifeq ($(strip $(STATIC)),true)
++install: all install-tools install-man $(INSTALL_NLS) $(INSTALL_BENCH)
++else
+ install: all install-lib install-tools install-man $(INSTALL_NLS) $(INSTALL_BENCH)
++endif
+ 
+ uninstall:
+ 	- rm -f $(DESTDIR)${libdir}/libcpupower.*
+diff -ur power-old/cpupower/man/cpupower-idle-info.1 power/cpupower/man/cpupower-idle-info.1
+--- power-old/cpupower/man/cpupower-idle-info.1	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/man/cpupower-idle-info.1	2016-01-14 13:59:07.683397619 -0500
+@@ -87,4 +87,5 @@
+ .fi
+ .SH "SEE ALSO"
+ .LP
+-cpupower(1), cpupower\-monitor(1), cpupower\-info(1), cpupower\-set(1)
++cpupower(1), cpupower\-monitor(1), cpupower\-info(1), cpupower\-set(1),
++cpupower\-idle\-set(1)
+Only in power/cpupower/man: cpupower-idle-set.1
+diff -ur power-old/cpupower/man/cpupower-monitor.1 power/cpupower/man/cpupower-monitor.1
+--- power-old/cpupower/man/cpupower-monitor.1	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/man/cpupower-monitor.1	2016-01-14 13:59:07.678397275 -0500
+@@ -99,13 +99,21 @@
+ kernel frequency driver periodically cleared aperf/mperf registers in those
+ kernels.
+ 
+-.SS "Nehalem" "SandyBridge"
++.SS "Nehalem" "SandyBridge" "HaswellExtended"
+ Intel Core and Package sleep state counters.
+ Threads (hyperthreaded cores) may not be able to enter deeper core states if
+ its sibling is utilized.
+ Deepest package sleep states may in reality show up as machine/platform wide
+ sleep states and can only be entered if all cores are idle. Look up Intel
+ manuals (some are provided in the References section) for further details.
++The monitors are named after the CPU family where the sleep state capabilities
++got introduced and may not match exactly the CPU name of the platform.
++For example an IvyBridge processor has sleep state capabilities which got
++introduced in Nehalem and SandyBridge processor families.
++Thus on an IvyBridge processor one will get Nehalem and SandyBridge sleep
++state monitors.
++HaswellExtended extra package sleep state capabilities are available only in a
++specific Haswell (family 0x45) and probably also other future processors.
+ 
+ .SS "Fam_12h" "Fam_14h"
+ AMD laptop and desktop processor (family 12h and 14h) sleep state counters.
+diff -ur power-old/cpupower/utils/builtin.h power/cpupower/utils/builtin.h
+--- power-old/cpupower/utils/builtin.h	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/builtin.h	2016-01-14 13:59:07.679397344 -0500
+@@ -5,6 +5,7 @@
+ extern int cmd_info(int argc, const char **argv);
+ extern int cmd_freq_set(int argc, const char **argv);
+ extern int cmd_freq_info(int argc, const char **argv);
++extern int cmd_idle_set(int argc, const char **argv);
+ extern int cmd_idle_info(int argc, const char **argv);
+ extern int cmd_monitor(int argc, const char **argv);
+ 
+diff -ur power-old/cpupower/utils/cpufreq-info.c power/cpupower/utils/cpufreq-info.c
+--- power-old/cpupower/utils/cpufreq-info.c	2016-01-14 12:45:15.859517931 -0500
++++ power/cpupower/utils/cpufreq-info.c	2016-01-14 13:59:07.704399058 -0500
+@@ -14,6 +14,7 @@
+ #include <getopt.h>
+ 
+ #include "cpufreq.h"
++#include "helpers/sysfs.h"
+ #include "helpers/helpers.h"
+ #include "helpers/bitmask.h"
+ 
+@@ -244,149 +245,21 @@
+ 	return 0;
+ }
+ 
+-static void debug_output_one(unsigned int cpu)
+-{
+-	char *driver;
+-	struct cpufreq_affected_cpus *cpus;
+-	struct cpufreq_available_frequencies *freqs;
+-	unsigned long min, max, freq_kernel, freq_hardware;
+-	unsigned long total_trans, latency;
+-	unsigned long long total_time;
+-	struct cpufreq_policy *policy;
+-	struct cpufreq_available_governors *governors;
+-	struct cpufreq_stats *stats;
+-
+-	if (cpufreq_cpu_exists(cpu))
+-		return;
+-
+-	freq_kernel = cpufreq_get_freq_kernel(cpu);
+-	freq_hardware = cpufreq_get_freq_hardware(cpu);
+-
+-	driver = cpufreq_get_driver(cpu);
+-	if (!driver) {
+-		printf(_("  no or unknown cpufreq driver is active on this CPU\n"));
+-	} else {
+-		printf(_("  driver: %s\n"), driver);
+-		cpufreq_put_driver(driver);
+-	}
+-
+-	cpus = cpufreq_get_related_cpus(cpu);
+-	if (cpus) {
+-		printf(_("  CPUs which run at the same hardware frequency: "));
+-		while (cpus->next) {
+-			printf("%d ", cpus->cpu);
+-			cpus = cpus->next;
+-		}
+-		printf("%d\n", cpus->cpu);
+-		cpufreq_put_related_cpus(cpus);
+-	}
+-
+-	cpus = cpufreq_get_affected_cpus(cpu);
+-	if (cpus) {
+-		printf(_("  CPUs which need to have their frequency coordinated by software: "));
+-		while (cpus->next) {
+-			printf("%d ", cpus->cpu);
+-			cpus = cpus->next;
+-		}
+-		printf("%d\n", cpus->cpu);
+-		cpufreq_put_affected_cpus(cpus);
+-	}
+-
+-	latency = cpufreq_get_transition_latency(cpu);
+-	if (latency) {
+-		printf(_("  maximum transition latency: "));
+-		print_duration(latency);
+-		printf(".\n");
+-	}
+-
+-	if (!(cpufreq_get_hardware_limits(cpu, &min, &max))) {
+-		printf(_("  hardware limits: "));
+-		print_speed(min);
+-		printf(" - ");
+-		print_speed(max);
+-		printf("\n");
+-	}
+-
+-	freqs = cpufreq_get_available_frequencies(cpu);
+-	if (freqs) {
+-		printf(_("  available frequency steps: "));
+-		while (freqs->next) {
+-			print_speed(freqs->frequency);
+-			printf(", ");
+-			freqs = freqs->next;
+-		}
+-		print_speed(freqs->frequency);
+-		printf("\n");
+-		cpufreq_put_available_frequencies(freqs);
+-	}
+-
+-	governors = cpufreq_get_available_governors(cpu);
+-	if (governors) {
+-		printf(_("  available cpufreq governors: "));
+-		while (governors->next) {
+-			printf("%s, ", governors->governor);
+-			governors = governors->next;
+-		}
+-		printf("%s\n", governors->governor);
+-		cpufreq_put_available_governors(governors);
+-	}
+-
+-	policy = cpufreq_get_policy(cpu);
+-	if (policy) {
+-		printf(_("  current policy: frequency should be within "));
+-		print_speed(policy->min);
+-		printf(_(" and "));
+-		print_speed(policy->max);
+-
+-		printf(".\n                  ");
+-		printf(_("The governor \"%s\" may"
+-		       " decide which speed to use\n                  within this range.\n"),
+-		       policy->governor);
+-		cpufreq_put_policy(policy);
+-	}
+-
+-	if (freq_kernel || freq_hardware) {
+-		printf(_("  current CPU frequency is "));
+-		if (freq_hardware) {
+-			print_speed(freq_hardware);
+-			printf(_(" (asserted by call to hardware)"));
+-		} else
+-			print_speed(freq_kernel);
+-		printf(".\n");
+-	}
+-	stats = cpufreq_get_stats(cpu, &total_time);
+-	if (stats) {
+-		printf(_("  cpufreq stats: "));
+-		while (stats) {
+-			print_speed(stats->frequency);
+-			printf(":%.2f%%", (100.0 * stats->time_in_state) / total_time);
+-			stats = stats->next;
+-			if (stats)
+-				printf(", ");
+-		}
+-		cpufreq_put_stats(stats);
+-		total_trans = cpufreq_get_transitions(cpu);
+-		if (total_trans)
+-			printf("  (%lu)\n", total_trans);
+-		else
+-			printf("\n");
+-	}
+-	get_boost_mode(cpu);
+-
+-}
+-
+ /* --freq / -f */
+ 
+ static int get_freq_kernel(unsigned int cpu, unsigned int human)
+ {
+ 	unsigned long freq = cpufreq_get_freq_kernel(cpu);
+-	if (!freq)
++	printf(_("  current CPU frequency: "));
++	if (!freq) {
++		printf(_(" Unable to call to kernel\n"));
+ 		return -EINVAL;
++	}
+ 	if (human) {
+ 		print_speed(freq);
+-		printf("\n");
+ 	} else
+-		printf("%lu\n", freq);
++		printf("%lu", freq);
++	printf(_(" (asserted by call to kernel)\n"));
+ 	return 0;
+ }
+ 
+@@ -396,13 +269,16 @@
+ static int get_freq_hardware(unsigned int cpu, unsigned int human)
+ {
+ 	unsigned long freq = cpufreq_get_freq_hardware(cpu);
+-	if (!freq)
++	printf(_("  current CPU frequency: "));
++	if (!freq) {
++		printf("Unable to call hardware\n");
+ 		return -EINVAL;
++	}
+ 	if (human) {
+ 		print_speed(freq);
+-		printf("\n");
+ 	} else
+-		printf("%lu\n", freq);
++		printf("%lu", freq);
++	printf(_(" (asserted by call to hardware)\n"));
+ 	return 0;
+ }
+ 
+@@ -411,9 +287,17 @@
+ static int get_hardware_limits(unsigned int cpu)
+ {
+ 	unsigned long min, max;
+-	if (cpufreq_get_hardware_limits(cpu, &min, &max))
++
++	printf(_("  hardware limits: "));
++	if (cpufreq_get_hardware_limits(cpu, &min, &max)) {
++		printf(_("Not Available\n"));
+ 		return -EINVAL;
+-	printf("%lu %lu\n", min, max);
++	}
++
++	print_speed(min);
++	printf(" - ");
++	print_speed(max);
++	printf("\n");
+ 	return 0;
+ }
+ 
+@@ -422,9 +306,11 @@
+ static int get_driver(unsigned int cpu)
+ {
+ 	char *driver = cpufreq_get_driver(cpu);
+-	if (!driver)
++	if (!driver) {
++		printf(_("  no or unknown cpufreq driver is active on this CPU\n"));
+ 		return -EINVAL;
+-	printf("%s\n", driver);
++	}
++	printf("  driver: %s\n", driver);
+ 	cpufreq_put_driver(driver);
+ 	return 0;
+ }
+@@ -434,9 +320,19 @@
+ static int get_policy(unsigned int cpu)
+ {
+ 	struct cpufreq_policy *policy = cpufreq_get_policy(cpu);
+-	if (!policy)
++	if (!policy) {
++		printf(_("  Unable to determine current policy\n"));
+ 		return -EINVAL;
+-	printf("%lu %lu %s\n", policy->min, policy->max, policy->governor);
++	}
++	printf(_("  current policy: frequency should be within "));
++	print_speed(policy->min);
++	printf(_(" and "));
++	print_speed(policy->max);
++
++	printf(".\n                  ");
++	printf(_("The governor \"%s\" may decide which speed to use\n"
++	       "                  within this range.\n"),
++	       policy->governor);
+ 	cpufreq_put_policy(policy);
+ 	return 0;
+ }
+@@ -447,8 +343,12 @@
+ {
+ 	struct cpufreq_available_governors *governors =
+ 		cpufreq_get_available_governors(cpu);
+-	if (!governors)
++
++	printf(_("  available cpufreq governors: "));
++	if (!governors) {
++		printf(_("Not Available\n"));
+ 		return -EINVAL;
++	}
+ 
+ 	while (governors->next) {
+ 		printf("%s ", governors->governor);
+@@ -465,8 +365,12 @@
+ static int get_affected_cpus(unsigned int cpu)
+ {
+ 	struct cpufreq_affected_cpus *cpus = cpufreq_get_affected_cpus(cpu);
+-	if (!cpus)
++
++	printf(_("  CPUs which need to have their frequency coordinated by software: "));
++	if (!cpus) {
++		printf(_("Not Available\n"));
+ 		return -EINVAL;
++	}
+ 
+ 	while (cpus->next) {
+ 		printf("%d ", cpus->cpu);
+@@ -482,8 +386,12 @@
+ static int get_related_cpus(unsigned int cpu)
+ {
+ 	struct cpufreq_affected_cpus *cpus = cpufreq_get_related_cpus(cpu);
+-	if (!cpus)
++
++	printf(_("  CPUs which run at the same hardware frequency: "));
++	if (!cpus) {
++		printf(_("Not Available\n"));
+ 		return -EINVAL;
++	}
+ 
+ 	while (cpus->next) {
+ 		printf("%d ", cpus->cpu);
+@@ -524,8 +432,12 @@
+ static int get_latency(unsigned int cpu, unsigned int human)
+ {
+ 	unsigned long latency = cpufreq_get_transition_latency(cpu);
+-	if (!latency)
++
++	printf(_("  maximum transition latency: "));
++	if (!latency || latency == UINT_MAX) {
++		printf(_(" Cannot determine or is not supported.\n"));
+ 		return -EINVAL;
++	}
+ 
+ 	if (human) {
+ 		print_duration(latency);
+@@ -535,6 +447,36 @@
+ 	return 0;
+ }
+ 
++static void debug_output_one(unsigned int cpu)
++{
++	struct cpufreq_available_frequencies *freqs;
++
++	get_driver(cpu);
++	get_related_cpus(cpu);
++	get_affected_cpus(cpu);
++	get_latency(cpu, 1);
++	get_hardware_limits(cpu);
++
++	freqs = cpufreq_get_available_frequencies(cpu);
++	if (freqs) {
++		printf(_("  available frequency steps:  "));
++		while (freqs->next) {
++			print_speed(freqs->frequency);
++			printf(", ");
++			freqs = freqs->next;
++		}
++		print_speed(freqs->frequency);
++		printf("\n");
++		cpufreq_put_available_frequencies(freqs);
++	}
++
++	get_available_governors(cpu);
++	get_policy(cpu);
++	if (get_freq_hardware(cpu, 1) < 0)
++		get_freq_kernel(cpu, 1);
++	get_boost_mode(cpu);
++}
++
+ static struct option info_opts[] = {
+ 	{ .name = "debug",	.has_arg = no_argument,		.flag = NULL,	.val = 'e'},
+ 	{ .name = "boost",	.has_arg = no_argument,		.flag = NULL,	.val = 'b'},
+@@ -647,11 +589,14 @@
+ 
+ 		if (!bitmask_isbitset(cpus_chosen, cpu))
+ 			continue;
+-		if (cpufreq_cpu_exists(cpu)) {
+-			printf(_("couldn't analyze CPU %d as it doesn't seem to be present\n"), cpu);
++
++		printf(_("analyzing CPU %d:\n"), cpu);
++
++		if (sysfs_is_cpu_online(cpu) != 1) {
++			printf(_(" *is offline\n"));
++			printf("\n");
+ 			continue;
+ 		}
+-		printf(_("analyzing CPU %d:\n"), cpu);
+ 
+ 		switch (output_param) {
+ 		case 'b':
+@@ -693,6 +638,7 @@
+ 		}
+ 		if (ret)
+ 			return ret;
++		printf("\n");
+ 	}
+ 	return ret;
+ }
+diff -ur power-old/cpupower/utils/cpufreq-set.c power/cpupower/utils/cpufreq-set.c
+--- power-old/cpupower/utils/cpufreq-set.c	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/cpufreq-set.c	2016-01-14 13:59:07.652395492 -0500
+@@ -17,6 +17,7 @@
+ 
+ #include "cpufreq.h"
+ #include "helpers/helpers.h"
++#include "helpers/sysfs.h"
+ 
+ #define NORM_FREQ_LEN 32
+ 
+@@ -318,14 +319,16 @@
+ 		    cpufreq_cpu_exists(cpu))
+ 			continue;
+ 
++		if (sysfs_is_cpu_online(cpu) != 1)
++			continue;
++
+ 		printf(_("Setting cpu: %d\n"), cpu);
+ 		ret = do_one_cpu(cpu, &new_pol, freq, policychange);
+-		if (ret)
+-			break;
++		if (ret) {
++			print_error();
++			return ret;
++		}
+ 	}
+ 
+-	if (ret)
+-		print_error();
+-
+-	return ret;
++	return 0;
+ }
+diff -ur power-old/cpupower/utils/cpuidle-info.c power/cpupower/utils/cpuidle-info.c
+--- power-old/cpupower/utils/cpuidle-info.c	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/cpuidle-info.c	2016-01-14 13:59:07.699398716 -0500
+@@ -12,7 +12,6 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <getopt.h>
+-#include <cpufreq.h>
+ 
+ #include "helpers/helpers.h"
+ #include "helpers/sysfs.h"
+@@ -25,8 +24,6 @@
+ 	int idlestates, idlestate;
+ 	char *tmp;
+ 
+-	printf(_ ("Analyzing CPU %d:\n"), cpu);
+-
+ 	idlestates = sysfs_get_idlestate_count(cpu);
+ 	if (idlestates == 0) {
+ 		printf(_("CPU %u: No idle states\n"), cpu);
+@@ -50,10 +47,14 @@
+ 		return;
+ 
+ 	for (idlestate = 0; idlestate < idlestates; idlestate++) {
++		int disabled = sysfs_is_idlestate_disabled(cpu, idlestate);
++		/* Disabled interface not supported on older kernels */
++		if (disabled < 0)
++			disabled = 0;
+ 		tmp = sysfs_get_idlestate_name(cpu, idlestate);
+ 		if (!tmp)
+ 			continue;
+-		printf("%s:\n", tmp);
++		printf("%s%s:\n", tmp, (disabled) ? " (DISABLED) " : "");
+ 		free(tmp);
+ 
+ 		tmp = sysfs_get_idlestate_desc(cpu, idlestate);
+@@ -69,7 +70,6 @@
+ 		printf(_("Duration: %llu\n"),
+ 		       sysfs_get_idlestate_time(cpu, idlestate));
+ 	}
+-	printf("\n");
+ }
+ 
+ static void cpuidle_general_output(void)
+@@ -195,10 +195,17 @@
+ 	for (cpu = bitmask_first(cpus_chosen);
+ 	     cpu <= bitmask_last(cpus_chosen); cpu++) {
+ 
+-		if (!bitmask_isbitset(cpus_chosen, cpu) ||
+-		    cpufreq_cpu_exists(cpu))
++		if (!bitmask_isbitset(cpus_chosen, cpu))
+ 			continue;
+ 
++		printf(_("analyzing CPU %d:\n"), cpu);
++
++		if (sysfs_is_cpu_online(cpu) != 1) {
++			printf(_(" *is offline\n"));
++			printf("\n");
++			continue;
++		}
++
+ 		switch (output_param) {
+ 
+ 		case 'o':
+@@ -209,6 +216,7 @@
+ 			cpuidle_cpu_output(cpu, verbose);
+ 			break;
+ 		}
++		printf("\n");
+ 	}
+ 	return EXIT_SUCCESS;
+ }
+diff -ur power-old/cpupower/utils/cpuidle-set.c power/cpupower/utils/cpuidle-set.c
+--- power-old/cpupower/utils/cpuidle-set.c	2016-01-14 12:59:40.253772066 -0500
++++ power/cpupower/utils/cpuidle-set.c	2016-01-14 13:59:07.690398099 -0500
+@@ -0,0 +1,188 @@
++#include <unistd.h>
++#include <stdio.h>
++#include <errno.h>
++#include <stdlib.h>
++#include <limits.h>
++#include <string.h>
++#include <ctype.h>
++
++#include <getopt.h>
++
++#include "cpufreq.h"
++#include "helpers/helpers.h"
++#include "helpers/sysfs.h"
++
++static struct option info_opts[] = {
++	{ .name = "disable",
++	  .has_arg = required_argument,	.flag = NULL,	.val = 'd'},
++	{ .name = "enable",
++	  .has_arg = required_argument,	.flag = NULL,	.val = 'e'},
++	{ .name = "disable-by-latency",
++	  .has_arg = required_argument,	.flag = NULL,	.val = 'D'},
++	{ .name = "enable-all",
++	  .has_arg = no_argument,	.flag = NULL,	.val = 'E'},
++	{ },
++};
++
++
++int cmd_idle_set(int argc, char **argv)
++{
++	extern char *optarg;
++	extern int optind, opterr, optopt;
++	int ret = 0, cont = 1, param = 0, disabled;
++	unsigned long long latency = 0, state_latency;
++	unsigned int cpu = 0, idlestate = 0, idlestates = 0;
++	char *endptr;
++
++	do {
++		ret = getopt_long(argc, argv, "d:e:ED:", info_opts, NULL);
++		if (ret == -1)
++			break;
++		switch (ret) {
++		case '?':
++			param = '?';
++			cont = 0;
++			break;
++		case 'd':
++			if (param) {
++				param = -1;
++				cont = 0;
++				break;
++			}
++			param = ret;
++			idlestate = atoi(optarg);
++			break;
++		case 'e':
++			if (param) {
++				param = -1;
++				cont = 0;
++				break;
++			}
++			param = ret;
++			idlestate = atoi(optarg);
++			break;
++		case 'D':
++			if (param) {
++				param = -1;
++				cont = 0;
++				break;
++			}
++			param = ret;
++			latency = strtoull(optarg, &endptr, 10);
++			if (*endptr != '\0') {
++				printf(_("Bad latency value: %s\n"), optarg);
++				exit(EXIT_FAILURE);
++			}
++			break;
++		case 'E':
++			if (param) {
++				param = -1;
++				cont = 0;
++				break;
++			}
++			param = ret;
++			break;
++		case -1:
++			cont = 0;
++			break;
++		}
++	} while (cont);
++
++	switch (param) {
++	case -1:
++		printf(_("You can't specify more than one "
++			 "output-specific argument\n"));
++		exit(EXIT_FAILURE);
++	case '?':
++		printf(_("invalid or unknown argument\n"));
++		exit(EXIT_FAILURE);
++	}
++
++	/* Default is: set all CPUs */
++	if (bitmask_isallclear(cpus_chosen))
++		bitmask_setall(cpus_chosen);
++
++	for (cpu = bitmask_first(cpus_chosen);
++	     cpu <= bitmask_last(cpus_chosen); cpu++) {
++
++		if (!bitmask_isbitset(cpus_chosen, cpu))
++			continue;
++
++		if (sysfs_is_cpu_online(cpu) != 1)
++			continue;
++
++		idlestates = sysfs_get_idlestate_count(cpu);
++		if (idlestates <= 0)
++			continue;
++
++		switch (param) {
++		case 'd':
++			ret = sysfs_idlestate_disable(cpu, idlestate, 1);
++			if (ret == 0)
++		printf(_("Idlestate %u disabled on CPU %u\n"),  idlestate, cpu);
++			else if (ret == -1)
++		printf(_("Idlestate %u not available on CPU %u\n"),
++		       idlestate, cpu);
++			else if (ret == -2)
++		printf(_("Idlestate disabling not supported by kernel\n"));
++			else
++		printf(_("Idlestate %u not disabled on CPU %u\n"),
++		       idlestate, cpu);
++			break;
++		case 'e':
++			ret = sysfs_idlestate_disable(cpu, idlestate, 0);
++			if (ret == 0)
++		printf(_("Idlestate %u enabled on CPU %u\n"),  idlestate, cpu);
++			else if (ret == -1)
++		printf(_("Idlestate %u not available on CPU %u\n"),
++		       idlestate, cpu);
++			else if (ret == -2)
++		printf(_("Idlestate enabling not supported by kernel\n"));
++			else
++		printf(_("Idlestate %u not enabled on CPU %u\n"),
++		       idlestate, cpu);
++			break;
++		case 'D':
++			for (idlestate = 0; idlestate < idlestates; idlestate++) {
++				disabled = sysfs_is_idlestate_disabled
++					(cpu, idlestate);
++				state_latency = sysfs_get_idlestate_latency
++					(cpu, idlestate);
++				if (disabled == 1) {
++					if (latency > state_latency){
++						ret = sysfs_idlestate_disable
++							(cpu, idlestate, 0);
++						if (ret == 0)
++		printf(_("Idlestate %u enabled on CPU %u\n"),  idlestate, cpu);
++					}
++					continue;
++				}
++				if (latency <= state_latency){
++					ret = sysfs_idlestate_disable
++						(cpu, idlestate, 1);
++					if (ret == 0)
++		printf(_("Idlestate %u disabled on CPU %u\n"), idlestate, cpu);
++				}
++			}
++			break;
++		case 'E':
++			for (idlestate = 0; idlestate < idlestates; idlestate++) {
++				disabled = sysfs_is_idlestate_disabled
++					(cpu, idlestate);
++				if (disabled == 1) {
++					ret = sysfs_idlestate_disable
++						(cpu, idlestate, 0);
++					if (ret == 0)
++		printf(_("Idlestate %u enabled on CPU %u\n"), idlestate, cpu);
++				}
++			}
++			break;
++		default:
++			/* Not reachable with proper args checking */
++			printf(_("Invalid or unknown argument\n"));
++			exit(EXIT_FAILURE);
++			break;
++		}
++	}
++	return EXIT_SUCCESS;
++}
+diff -ur power-old/cpupower/utils/cpupower.c power/cpupower/utils/cpupower.c
+--- power-old/cpupower/utils/cpupower.c	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/cpupower.c	2016-01-14 13:59:07.627394060 -0500
+@@ -12,6 +12,9 @@
+ #include <string.h>
+ #include <unistd.h>
+ #include <errno.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <sys/utsname.h>
+ 
+ #include "builtin.h"
+ #include "helpers/helpers.h"
+@@ -168,6 +171,8 @@
+ {
+ 	const char *cmd;
+ 	unsigned int i, ret;
++	struct stat statbuf;
++	struct utsname uts;
+ 
+ 	cpus_chosen = bitmask_alloc(sysconf(_SC_NPROCESSORS_CONF));
+ 
+@@ -193,7 +198,16 @@
+ 	}
+ 
+ 	get_cpu_info(0, &cpupower_cpu_info);
+-	run_as_root = !getuid();
++	run_as_root = !geteuid();
++	if (run_as_root) {
++		ret = uname(&uts);
++		if (!ret && !strcmp(uts.machine, "x86_64") &&
++		    stat("/dev/cpu/0/msr", &statbuf) != 0) {
++			if (system("modprobe msr") == -1)
++	fprintf(stderr, _("MSR access not available.\n"));
++		}
++	}
++		
+ 
+ 	for (i = 0; i < ARRAY_SIZE(commands); i++) {
+ 		struct cmd_struct *p = commands + i;
+diff -ur power-old/cpupower/utils/cpupower-set.c power/cpupower/utils/cpupower-set.c
+--- power-old/cpupower/utils/cpupower-set.c	2016-01-14 12:45:15.845517611 -0500
++++ power/cpupower/utils/cpupower-set.c	2016-01-14 13:59:07.701398854 -0500
+@@ -12,14 +12,12 @@
+ #include <string.h>
+ #include <getopt.h>
+ 
+-#include <cpufreq.h>
+ #include "helpers/helpers.h"
+ #include "helpers/sysfs.h"
+ #include "helpers/bitmask.h"
+ 
+ static struct option set_opts[] = {
+-	{ .name = "perf-bias",	.has_arg = optional_argument,	.flag = NULL,	.val = 'b'},
+-	{ .name = "sched-smt",	.has_arg = optional_argument,	.flag = NULL,	.val = 's'},
++	{"perf-bias", required_argument, NULL, 'b'},
+ 	{ },
+ };
+ 
+@@ -37,13 +35,11 @@
+ 
+ 	union {
+ 		struct {
+-			int sched_mc:1;
+-			int sched_smt:1;
+ 			int perf_bias:1;
+ 		};
+ 		int params;
+ 	} params;
+-	int sched_mc = 0, sched_smt = 0, perf_bias = 0;
++	int perf_bias = 0;
+ 	int ret = 0;
+ 
+ 	setlocale(LC_ALL, "");
+@@ -51,7 +47,7 @@
+ 
+ 	params.params = 0;
+ 	/* parameter parsing */
+-	while ((ret = getopt_long(argc, argv, "s:b:",
++	while ((ret = getopt_long(argc, argv, "b:",
+ 						set_opts, NULL)) != -1) {
+ 		switch (ret) {
+ 		case 'b':
+@@ -65,17 +61,6 @@
+ 			}
+ 			params.perf_bias = 1;
+ 			break;
+-		case 's':
+-			if (params.sched_smt)
+-				print_wrong_arg_exit();
+-			sched_smt = atoi(optarg);
+-			if (sched_smt < 0 || sched_smt > 2) {
+-				printf(_("--sched-smt param out "
+-					 "of range [0-%d]\n"), 2);
+-				print_wrong_arg_exit();
+-			}
+-			params.sched_smt = 1;
+-			break;
+ 		default:
+ 			print_wrong_arg_exit();
+ 		}
+@@ -84,19 +69,6 @@
+ 	if (!params.params)
+ 		print_wrong_arg_exit();
+ 
+-	if (params.sched_mc) {
+-		ret = sysfs_set_sched("mc", sched_mc);
+-		if (ret)
+-			fprintf(stderr, _("Error setting sched-mc %s\n"),
+-				(ret == -ENODEV) ? "not supported" : "");
+-	}
+-	if (params.sched_smt) {
+-		ret = sysfs_set_sched("smt", sched_smt);
+-		if (ret)
+-			fprintf(stderr, _("Error setting sched-smt %s\n"),
+-				(ret == -ENODEV) ? "not supported" : "");
+-	}
+-
+ 	/* Default is: set all CPUs */
+ 	if (bitmask_isallclear(cpus_chosen))
+ 		bitmask_setall(cpus_chosen);
+@@ -105,10 +77,15 @@
+ 	for (cpu = bitmask_first(cpus_chosen);
+ 	     cpu <= bitmask_last(cpus_chosen); cpu++) {
+ 
+-		if (!bitmask_isbitset(cpus_chosen, cpu) ||
+-		    cpufreq_cpu_exists(cpu))
++		if (!bitmask_isbitset(cpus_chosen, cpu))
+ 			continue;
+ 
++		if (sysfs_is_cpu_online(cpu) != 1){
++			fprintf(stderr, _("Cannot set values on CPU %d:"), cpu);
++			fprintf(stderr, _(" *is offline\n"));
++			continue;
++		}
++
+ 		if (params.perf_bias) {
+ 			ret = msr_intel_set_perf_bias(cpu, perf_bias);
+ 			if (ret) {
+diff -ur power-old/cpupower/utils/helpers/helpers.h power/cpupower/utils/helpers/helpers.h
+--- power-old/cpupower/utils/helpers/helpers.h	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/helpers/helpers.h	2016-01-14 13:59:07.656395764 -0500
+@@ -92,6 +92,14 @@
+ extern struct cpupower_cpu_info cpupower_cpu_info;
+ /* cpuid and cpuinfo helpers  **************************/
+ 
++struct cpuid_core_info {
++	int pkg;
++	int core;
++	int cpu;
++
++	/* flags */
++	unsigned int is_online:1;
++};
+ 
+ /* CPU topology/hierarchy parsing ******************/
+ struct cpupower_topology {
+@@ -101,14 +109,7 @@
+ 	unsigned int threads; /* per core */
+ 
+ 	/* Array gets mallocated with cores entries, holding per core info */
+-	struct {
+-		int pkg;
+-		int core;
+-		int cpu;
+-
+-		/* flags */
+-		unsigned int is_online:1;
+-	} *core_info;
++	struct cpuid_core_info *core_info;
+ };
+ 
+ extern int get_cpu_topology(struct cpupower_topology *cpu_top);
+diff -ur power-old/cpupower/utils/helpers/pci.c power/cpupower/utils/helpers/pci.c
+--- power-old/cpupower/utils/helpers/pci.c	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/helpers/pci.c	2016-01-14 13:59:07.629394158 -0500
+@@ -25,14 +25,21 @@
+ struct pci_dev *pci_acc_init(struct pci_access **pacc, int domain, int bus,
+ 			     int slot, int func, int vendor, int dev)
+ {
+-	struct pci_filter filter_nb_link = { domain, bus, slot, func,
+-					     vendor, dev };
++	struct pci_filter filter_nb_link;
+ 	struct pci_dev *device;
+ 
+ 	*pacc = pci_alloc();
+ 	if (*pacc == NULL)
+ 		return NULL;
+ 
++	pci_filter_init(*pacc, &filter_nb_link);
++	filter_nb_link.domain	= domain;
++	filter_nb_link.bus	= bus;
++	filter_nb_link.slot	= slot;
++	filter_nb_link.func	= func;
++	filter_nb_link.vendor	= vendor;
++	filter_nb_link.device	= dev;
++
+ 	pci_init(*pacc);
+ 	pci_scan_bus(*pacc);
+ 
+diff -ur power-old/cpupower/utils/helpers/sysfs.c power/cpupower/utils/helpers/sysfs.c
+--- power-old/cpupower/utils/helpers/sysfs.c	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/helpers/sysfs.c	2016-01-14 13:59:07.674397002 -0500
+@@ -100,7 +100,7 @@
+ 	close(fd);
+ 
+ 	value = strtoull(linebuf, &endp, 0);
+-	if (value > 1 || value < 0)
++	if (value > 1)
+ 		return -EINVAL;
+ 
+ 	return value;
+@@ -108,6 +108,33 @@
+ 
+ /* CPUidle idlestate specific /sys/devices/system/cpu/cpuX/cpuidle/ access */
+ 
++
++/* CPUidle idlestate specific /sys/devices/system/cpu/cpuX/cpuidle/ access */
++
++/*
++ * helper function to check whether a file under "../cpuX/cpuidle/stateX/" dir
++ * exists.
++ * For example the functionality to disable c-states was introduced in later
++ * kernel versions, this function can be used to explicitly check for this
++ * feature.
++ *
++ * returns 1 if the file exists, 0 otherwise.
++ */
++unsigned int sysfs_idlestate_file_exists(unsigned int cpu,
++					 unsigned int idlestate,
++					 const char *fname)
++{
++	char path[SYSFS_PATH_MAX];
++	struct stat statbuf;
++
++
++	snprintf(path, sizeof(path), PATH_TO_CPU "cpu%u/cpuidle/state%u/%s",
++		 cpu, idlestate, fname);
++	if (stat(path, &statbuf) != 0)
++		return 0;
++	return 1;
++}
++
+ /*
+  * helper function to read file from /sys into given buffer
+  * fname is a relative path under "cpuX/cpuidle/stateX/" dir
+@@ -140,6 +167,40 @@
+ 	return (unsigned int) numread;
+ }
+ 
++/* 
++ * helper function to write a new value to a /sys file
++ * fname is a relative path under "../cpuX/cpuidle/cstateY/" dir
++ *
++ * Returns the number of bytes written or 0 on error
++ */
++static
++unsigned int sysfs_idlestate_write_file(unsigned int cpu,
++					unsigned int idlestate,
++					const char *fname,
++					const char *value, size_t len)
++{
++	char path[SYSFS_PATH_MAX];
++	int fd;
++	ssize_t numwrite;
++
++	snprintf(path, sizeof(path), PATH_TO_CPU "cpu%u/cpuidle/state%u/%s",
++		 cpu, idlestate, fname);
++
++	fd = open(path, O_WRONLY);
++	if (fd == -1)
++		return 0;
++
++	numwrite = write(fd, value, len);
++	if (numwrite < 1) {
++		close(fd);
++		return 0;
++	}
++
++	close(fd);
++
++	return (unsigned int) numwrite;
++}
++
+ /* read access to files which contain one numeric value */
+ 
+ enum idlestate_value {
+@@ -147,6 +208,7 @@
+ 	IDLESTATE_POWER,
+ 	IDLESTATE_LATENCY,
+ 	IDLESTATE_TIME,
++	IDLESTATE_DISABLE,
+ 	MAX_IDLESTATE_VALUE_FILES
+ };
+ 
+@@ -155,6 +217,7 @@
+ 	[IDLESTATE_POWER] = "power",
+ 	[IDLESTATE_LATENCY] = "latency",
+ 	[IDLESTATE_TIME]  = "time",
++	[IDLESTATE_DISABLE]  = "disable",
+ };
+ 
+ static unsigned long long sysfs_idlestate_get_one_value(unsigned int cpu,
+@@ -224,8 +287,59 @@
+ 	return result;
+ }
+ 
++/*
++ * Returns:
++ *    1  if disabled
++ *    0  if enabled
++ *    -1 if idlestate is not available
++ *    -2 if disabling is not supported by the kernel
++ */
++int sysfs_is_idlestate_disabled(unsigned int cpu,
++				unsigned int idlestate)
++{
++	if (sysfs_get_idlestate_count(cpu) < idlestate)
++		return -1;
++
++	if (!sysfs_idlestate_file_exists(cpu, idlestate,
++				 idlestate_value_files[IDLESTATE_DISABLE]))
++		return -2;
++	return sysfs_idlestate_get_one_value(cpu, idlestate, IDLESTATE_DISABLE);
++}
++
++/*
++ * Pass 1 as last argument to disable or 0 to enable the state
++ * Returns:
++ *    0  on success
++ *    negative values on error, for example:
++ *      -1 if idlestate is not available
++ *      -2 if disabling is not supported by the kernel
++ *      -3 No write access to disable/enable C-states
++ */
++int sysfs_idlestate_disable(unsigned int cpu,
++			    unsigned int idlestate,
++			    unsigned int disable)
++{
++	char value[SYSFS_PATH_MAX];
++	int bytes_written;
++
++	if (sysfs_get_idlestate_count(cpu) < idlestate)
++		return -1;
++
++	if (!sysfs_idlestate_file_exists(cpu, idlestate,
++				 idlestate_value_files[IDLESTATE_DISABLE]))
++		return -2;
++
++	snprintf(value, SYSFS_PATH_MAX, "%u", disable);
++
++	bytes_written = sysfs_idlestate_write_file(cpu, idlestate, "disable",
++						   value, sizeof(disable));
++	if (bytes_written)
++		return 0;
++	return -3;
++}
++
+ unsigned long sysfs_get_idlestate_latency(unsigned int cpu,
+-					unsigned int idlestate)
++					  unsigned int idlestate)
+ {
+ 	return sysfs_idlestate_get_one_value(cpu, idlestate, IDLESTATE_LATENCY);
+ }
+@@ -266,7 +380,7 @@
+ 
+ 	snprintf(file, SYSFS_PATH_MAX, PATH_TO_CPU "cpuidle");
+ 	if (stat(file, &statbuf) != 0 || !S_ISDIR(statbuf.st_mode))
+-		return -ENODEV;
++		return 0;
+ 
+ 	snprintf(file, SYSFS_PATH_MAX, PATH_TO_CPU "cpu%u/cpuidle/state0", cpu);
+ 	if (stat(file, &statbuf) != 0 || !S_ISDIR(statbuf.st_mode))
+diff -ur power-old/cpupower/utils/helpers/sysfs.h power/cpupower/utils/helpers/sysfs.h
+--- power-old/cpupower/utils/helpers/sysfs.h	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/helpers/sysfs.h	2016-01-14 13:59:07.676397138 -0500
+@@ -7,8 +7,16 @@
+ 
+ extern unsigned int sysfs_read_file(const char *path, char *buf, size_t buflen);
+ 
++extern unsigned int sysfs_idlestate_file_exists(unsigned int cpu,
++						unsigned int idlestate,
++						const char *fname);
++
+ extern int sysfs_is_cpu_online(unsigned int cpu);
+ 
++extern int sysfs_is_idlestate_disabled(unsigned int cpu,
++				       unsigned int idlestate);
++extern int sysfs_idlestate_disable(unsigned int cpu, unsigned int idlestate,
++				   unsigned int disable);
+ extern unsigned long sysfs_get_idlestate_latency(unsigned int cpu,
+ 						unsigned int idlestate);
+ extern unsigned long sysfs_get_idlestate_usage(unsigned int cpu,
+diff -ur power-old/cpupower/utils/helpers/topology.c power/cpupower/utils/helpers/topology.c
+--- power-old/cpupower/utils/helpers/topology.c	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/helpers/topology.c	2016-01-14 13:59:07.694398373 -0500
+@@ -20,9 +20,8 @@
+ #include <helpers/sysfs.h>
+ 
+ /* returns -1 on failure, 0 on success */
+-int sysfs_topology_read_file(unsigned int cpu, const char *fname)
++static int sysfs_topology_read_file(unsigned int cpu, const char *fname, int *result)
+ {
+-	unsigned long value;
+ 	char linebuf[MAX_LINE_LEN];
+ 	char *endp;
+ 	char path[SYSFS_PATH_MAX];
+@@ -31,20 +30,12 @@
+ 			 cpu, fname);
+ 	if (sysfs_read_file(path, linebuf, MAX_LINE_LEN) == 0)
+ 		return -1;
+-	value = strtoul(linebuf, &endp, 0);
++	*result = strtol(linebuf, &endp, 0);
+ 	if (endp == linebuf || errno == ERANGE)
+ 		return -1;
+-	return value;
++	return 0;
+ }
+ 
+-struct cpuid_core_info {
+-	unsigned int pkg;
+-	unsigned int thread;
+-	unsigned int cpu;
+-	/* flags */
+-	unsigned int is_online:1;
+-};
+-
+ static int __compare(const void *t1, const void *t2)
+ {
+ 	struct cpuid_core_info *top1 = (struct cpuid_core_info *)t1;
+@@ -53,9 +44,9 @@
+ 		return -1;
+ 	else if (top1->pkg > top2->pkg)
+ 		return 1;
+-	else if (top1->thread < top2->thread)
++	else if (top1->core < top2->core)
+ 		return -1;
+-	else if (top1->thread > top2->thread)
++	else if (top1->core > top2->core)
+ 		return 1;
+ 	else if (top1->cpu < top2->cpu)
+ 		return -1;
+@@ -73,28 +64,51 @@
+  */
+ int get_cpu_topology(struct cpupower_topology *cpu_top)
+ {
+-	int cpu, cpus = sysconf(_SC_NPROCESSORS_CONF);
++	int cpu, last_pkg, cpus = sysconf(_SC_NPROCESSORS_CONF);
+ 
+-	cpu_top->core_info = malloc(sizeof(struct cpupower_topology) * cpus);
++	cpu_top->core_info = malloc(sizeof(struct cpuid_core_info) * cpus);
+ 	if (cpu_top->core_info == NULL)
+ 		return -ENOMEM;
+ 	cpu_top->pkgs = cpu_top->cores = 0;
+ 	for (cpu = 0; cpu < cpus; cpu++) {
+ 		cpu_top->core_info[cpu].cpu = cpu;
+ 		cpu_top->core_info[cpu].is_online = sysfs_is_cpu_online(cpu);
+-		cpu_top->core_info[cpu].pkg =
+-			sysfs_topology_read_file(cpu, "physical_package_id");
+-		if ((int)cpu_top->core_info[cpu].pkg != -1 &&
+-		    cpu_top->core_info[cpu].pkg > cpu_top->pkgs)
+-			cpu_top->pkgs = cpu_top->core_info[cpu].pkg;
+-		cpu_top->core_info[cpu].core =
+-			sysfs_topology_read_file(cpu, "core_id");
++		if(sysfs_topology_read_file(
++			cpu,
++			"physical_package_id",
++			&(cpu_top->core_info[cpu].pkg)) < 0) {
++			cpu_top->core_info[cpu].pkg = -1;
++			cpu_top->core_info[cpu].core = -1;
++			continue;
++		}
++		if(sysfs_topology_read_file(
++			cpu,
++			"core_id",
++			&(cpu_top->core_info[cpu].core)) < 0) {
++			cpu_top->core_info[cpu].pkg = -1;
++			cpu_top->core_info[cpu].core = -1;
++			continue;
++		}
+ 	}
+-	cpu_top->pkgs++;
+ 
+ 	qsort(cpu_top->core_info, cpus, sizeof(struct cpuid_core_info),
+ 	      __compare);
+ 
++	/* Count the number of distinct pkgs values. This works
++	   because the primary sort of the core_info struct was just
++	   done by pkg value. */
++	last_pkg = cpu_top->core_info[0].pkg;
++	for(cpu = 1; cpu < cpus; cpu++) {
++		if (cpu_top->core_info[cpu].pkg != last_pkg &&
++				cpu_top->core_info[cpu].pkg != -1) {
++
++			last_pkg = cpu_top->core_info[cpu].pkg;
++			cpu_top->pkgs++;
++		}
++	}
++	if (!(cpu_top->core_info[0].pkg == -1))
++		cpu_top->pkgs++;
++
+ 	/* Intel's cores count is not consecutively numbered, there may
+ 	 * be a core_id of 3, but none of 2. Assume there always is 0
+ 	 * Get amount of cores by counting duplicates in a package
+diff -ur power-old/cpupower/utils/idle_monitor/cpupower-monitor.c power/cpupower/utils/idle_monitor/cpupower-monitor.c
+--- power-old/cpupower/utils/idle_monitor/cpupower-monitor.c	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/idle_monitor/cpupower-monitor.c	2016-01-14 13:59:07.673396933 -0500
+@@ -143,6 +143,9 @@
+ 	/* Be careful CPUs may got resorted for pkg value do not just use cpu */
+ 	if (!bitmask_isbitset(cpus_chosen, cpu_top.core_info[cpu].cpu))
+ 		return;
++	if (!cpu_top.core_info[cpu].is_online &&
++	    cpu_top.core_info[cpu].pkg == -1)
++		return;
+ 
+ 	if (topology_depth > 2)
+ 		printf("%4d|", cpu_top.core_info[cpu].pkg);
+@@ -191,7 +194,8 @@
+ 	 * It's up to the monitor plug-in to check .is_online, this one
+ 	 * is just for additional info.
+ 	 */
+-	if (!cpu_top.core_info[cpu].is_online) {
++	if (!cpu_top.core_info[cpu].is_online &&
++	    cpu_top.core_info[cpu].pkg != -1) {
+ 		printf(_(" *is offline\n"));
+ 		return;
+ 	} else
+@@ -373,6 +377,9 @@
+ 		return EXIT_FAILURE;
+ 	}
+ 
++	if (!cpu_top.core_info[0].is_online)
++		printf("WARNING: at least one cpu is offline\n");
++
+ 	/* Default is: monitor all CPUs */
+ 	if (bitmask_isallclear(cpus_chosen))
+ 		bitmask_setall(cpus_chosen);
+diff -ur power-old/cpupower/utils/idle_monitor/mperf_monitor.c power/cpupower/utils/idle_monitor/mperf_monitor.c
+--- power-old/cpupower/utils/idle_monitor/mperf_monitor.c	2012-06-12 15:10:58.000000000 -0400
++++ power/cpupower/utils/idle_monitor/mperf_monitor.c	2016-01-14 13:59:07.641394760 -0500
+@@ -135,7 +135,7 @@
+ 		dprint("%s: TSC Ref - mperf_diff: %llu, tsc_diff: %llu\n",
+ 		       mperf_cstates[id].name, mperf_diff, tsc_diff);
+ 	} else if (max_freq_mode == MAX_FREQ_SYSFS) {
+-		timediff = timespec_diff_us(time_start, time_end);
++		timediff = max_frequency * timespec_diff_us(time_start, time_end);
+ 		*percent = 100.0 * mperf_diff / timediff;
+ 		dprint("%s: MAXFREQ - mperf_diff: %llu, time_diff: %llu\n",
+ 		       mperf_cstates[id].name, mperf_diff, timediff);
+@@ -176,7 +176,7 @@
+ 	dprint("%s: Average freq based on %s maximum frequency:\n",
+ 	       mperf_cstates[id].name,
+ 	       (max_freq_mode == MAX_FREQ_TSC_REF) ? "TSC calculated" : "sysfs read");
+-	dprint("%max_frequency: %lu", max_frequency);
++	dprint("max_frequency: %lu\n", max_frequency);
+ 	dprint("aperf_diff: %llu\n", aperf_diff);
+ 	dprint("mperf_diff: %llu\n", mperf_diff);
+ 	dprint("avg freq:   %llu\n", *count);
+@@ -237,7 +237,7 @@
+ 	unsigned long long hwcr;
+ 	unsigned long min;
+ 
+-	if (!cpupower_cpu_info.caps & CPUPOWER_CAP_INV_TSC)
++	if (!(cpupower_cpu_info.caps & CPUPOWER_CAP_INV_TSC))
+ 		goto use_sysfs;
+ 
+ 	if (cpupower_cpu_info.vendor == X86_VENDOR_AMD) {
+@@ -279,6 +279,7 @@
+ 		return -1;
+ 	}
+ 	max_freq_mode = MAX_FREQ_SYSFS;
++	max_frequency /= 1000; /* Default automatically to MHz value */
+ 	return 0;
+ }
+ 
+diff -ur power-old/x86/turbostat/Makefile power/x86/turbostat/Makefile
+--- power-old/x86/turbostat/Makefile	2012-06-12 15:10:58.000000000 -0400
++++ power/x86/turbostat/Makefile	2016-01-14 13:59:07.631394234 -0500
+@@ -1,4 +1,5 @@
+ turbostat : turbostat.c
++CFLAGS +=	-Wall
+ 
+ clean :
+ 	rm -f turbostat
+diff -ur power-old/x86/turbostat/turbostat.8 power/x86/turbostat/turbostat.8
+--- power-old/x86/turbostat/turbostat.8	2016-01-14 12:45:15.868518343 -0500
++++ power/x86/turbostat/turbostat.8	2016-01-14 13:59:07.642394823 -0500
+@@ -219,11 +219,6 @@
+ that they count at TSC rate, which is true on all processors tested to date.
+ 
+ .SH REFERENCES
+-"Intel® Turbo Boost Technology
+-in Intel® Core™ Microarchitecture (Nehalem) Based Processors"
+-http://download.intel.com/design/processor/applnots/320354.pdf
+-
+-"Intel® 64 and IA-32 Architectures Software Developer's Manual
+ Volume 3B: System Programming Guide"
+ http://www.intel.com/products/processor/manuals/
+ 
+diff -ur power-old/x86/turbostat/turbostat.c power/x86/turbostat/turbostat.c
+--- power-old/x86/turbostat/turbostat.c	2016-01-14 12:45:15.866518243 -0500
++++ power/x86/turbostat/turbostat.c	2016-01-14 13:59:07.705399126 -0500
+@@ -42,67 +42,6 @@
+ #include <linux/capability.h>
+ #include <errno.h>
+ 
+-/*
+- * NOTE: RHEL6 only defines, these need to be removed as we add them to the
+- * kernel
+- */
+-#define MSR_IA32_MPERF                  0x000000e7
+-#define MSR_IA32_APERF                  0x000000e8
+-#define MSR_CORE_C1_RES                 0x00000660
+-#define MSR_PKG_C3_RESIDENCY            0x000003f8
+-#define MSR_PKG_C6_RESIDENCY            0x000003f9
+-#define MSR_PKG_C7_RESIDENCY            0x000003fa
+-#define MSR_CORE_C3_RESIDENCY           0x000003fc
+-#define MSR_CORE_C6_RESIDENCY           0x000003fd
+-#define MSR_CORE_C7_RESIDENCY           0x000003fe
+-#define MSR_PKG_C2_RESIDENCY            0x0000060d
+-#define MSR_PKG_C8_RESIDENCY            0x00000630
+-#define MSR_PKG_C9_RESIDENCY            0x00000631
+-#define MSR_PKG_C10_RESIDENCY           0x00000632
+-#define MSR_PKG_ENERGY_STATUS           0x00000611
+-#define MSR_PP0_ENERGY_STATUS           0x00000639
+-#define MSR_PP1_ENERGY_STATUS           0x00000641
+-#define MSR_DRAM_ENERGY_STATUS          0x00000619
+-#define MSR_DRAM_PERF_STATUS            0x0000061b
+-#define MSR_PKG_PERF_STATUS             0x00000613
+-#define MSR_IA32_PACKAGE_THERM_STATUS   0x000001b1
+-#define MSR_NHM_PLATFORM_INFO           0x000000ce
+-#define MSR_IA32_POWER_CTL              0x000001fc
+-#define MSR_TURBO_RATIO_LIMIT           0x000001ad
+-#define MSR_TURBO_RATIO_LIMIT1          0x000001ae
+-#define MSR_TURBO_RATIO_LIMIT2          0x000001af
+-#define MSR_NHM_SNB_PKG_CST_CFG_CTL     0x000000e2
+-#define NHM_C3_AUTO_DEMOTE              (1UL << 25)
+-#define NHM_C1_AUTO_DEMOTE              (1UL << 26)
+-#define MSR_IA32_ENERGY_PERF_BIAS       0x000001b0
+-#define ENERGY_PERF_BIAS_PERFORMANCE    0
+-#define ENERGY_PERF_BIAS_NORMAL         6
+-#define ENERGY_PERF_BIAS_POWERSAVE      15
+-#define MSR_CORE_PERF_LIMIT_REASONS     0x00000690
+-#define MSR_GFX_PERF_LIMIT_REASONS      0x000006B0
+-#define MSR_RING_PERF_LIMIT_REASONS     0x000006B1
+-#define MSR_PKG_POWER_INFO              0x00000614
+-#define MSR_RAPL_POWER_UNIT             0x00000606
+-#define MSR_IA32_THERM_STATUS           0x0000019c
+-#define MSR_RAPL_POWER_UNIT             0x00000606
+-#define MSR_PKG_POWER_LIMIT             0x00000610
+-#define MSR_PKG_ENERGY_STATUS           0x00000611
+-#define MSR_PKG_PERF_STATUS             0x00000613
+-#define MSR_PKG_POWER_INFO              0x00000614
+-#define MSR_SMI_COUNT                   0x00000034
+-#define MSR_PKG_WEIGHTED_CORE_C0_RES    0x00000658
+-#define MSR_PKG_ANY_CORE_C0_RES         0x00000659
+-#define MSR_PKG_ANY_GFXE_C0_RES         0x0000065A
+-#define MSR_PKG_BOTH_CORE_GFXE_C0_RES   0x0000065B
+-#define MSR_DRAM_POWER_INFO             0x0000061c
+-#define MSR_DRAM_POWER_LIMIT            0x00000618
+-#define MSR_PP0_POLICY                  0x0000063a
+-#define MSR_PP0_POWER_LIMIT             0x00000638
+-#define MSR_PP1_POLICY                  0x00000642
+-#define MSR_PP1_POWER_LIMIT             0x00000640
+-#define MSR_FSB_FREQ                    0x000000cd
+-#define MSR_IA32_TEMPERATURE_TARGET     0x000001a2
+-
+ 
+ char *proc_stat = "/proc/stat";
+ unsigned int interval_sec = 5;
+@@ -114,6 +53,7 @@
+ unsigned int skip_c1;
+ unsigned int do_nhm_cstates;
+ unsigned int do_snb_cstates;
++unsigned int do_knl_cstates;
+ unsigned int do_pc2;
+ unsigned int do_pc3;
+ unsigned int do_pc6;
+@@ -132,8 +72,12 @@
+ unsigned int extra_msr_offset64;
+ unsigned int extra_delta_offset32;
+ unsigned int extra_delta_offset64;
++unsigned int aperf_mperf_multiplier = 1;
+ int do_smi;
+ double bclk;
++double base_hz;
++unsigned int has_base_hz;
++double tsc_tweak = 1.0;
+ unsigned int show_pkg;
+ unsigned int show_core;
+ unsigned int show_cpu;
+@@ -153,6 +97,8 @@
+ unsigned int do_ring_perf_limit_reasons;
+ unsigned int crystal_hz;
+ unsigned long long tsc_hz;
++int base_cpu;
++double discover_bclk(unsigned int family, unsigned int model);
+ 
+ #define RAPL_PKG		(1 << 0)
+ 					/* 0x610 MSR_PKG_POWER_LIMIT */
+@@ -378,7 +324,7 @@
+ 
+ 	if (do_nhm_cstates)
+ 		outp += sprintf(outp, "  CPU%%c1");
+-	if (do_nhm_cstates && !do_slm_cstates)
++	if (do_nhm_cstates && !do_slm_cstates && !do_knl_cstates)
+ 		outp += sprintf(outp, "  CPU%%c3");
+ 	if (do_nhm_cstates)
+ 		outp += sprintf(outp, "  CPU%%c6");
+@@ -432,7 +378,7 @@
+ 		if (do_rapl & RAPL_GFX)
+ 			outp += sprintf(outp, "   GFX_J");
+ 		if (do_rapl & RAPL_DRAM)
+-			outp += sprintf(outp, "   RAM_W");
++			outp += sprintf(outp, "   RAM_J");
+ 		if (do_rapl & RAPL_PKG_PERF_STATUS)
+ 			outp += sprintf(outp, "   PKG_%%");
+ 		if (do_rapl & RAPL_DRAM_PERF_STATUS)
+@@ -562,15 +508,19 @@
+ 	/* %Busy */
+ 	if (has_aperf) {
+ 		if (!skip_c0)
+-			outp += sprintf(outp, "%8.2f", 100.0 * t->mperf/t->tsc);
++			outp += sprintf(outp, "%8.2f", 100.0 * t->mperf/t->tsc/tsc_tweak);
+ 		else
+ 			outp += sprintf(outp, "********");
+ 	}
+ 
+ 	/* Bzy_MHz */
+-	if (has_aperf)
+-		outp += sprintf(outp, "%8.0f",
+-			1.0 * t->tsc / units * t->aperf / t->mperf / interval_float);
++	if (has_aperf) {
++		if (has_base_hz)
++			outp += sprintf(outp, "%8.0f", base_hz / units * t->aperf / t->mperf);
++		else
++			outp += sprintf(outp, "%8.0f",
++				1.0 * t->tsc / units * t->aperf / t->mperf / interval_float);
++	}
+ 
+ 	/* TSC_MHz */
+ 	outp += sprintf(outp, "%8.0f", 1.0 * t->tsc/units/interval_float);
+@@ -608,7 +558,7 @@
+ 	if (!(t->flags & CPU_IS_FIRST_THREAD_IN_CORE))
+ 		goto done;
+ 
+-	if (do_nhm_cstates && !do_slm_cstates)
++	if (do_nhm_cstates && !do_slm_cstates && !do_knl_cstates)
+ 		outp += sprintf(outp, "%8.2f", 100.0 * c->c3/t->tsc);
+ 	if (do_nhm_cstates)
+ 		outp += sprintf(outp, "%8.2f", 100.0 * c->c6/t->tsc);
+@@ -1044,6 +994,8 @@
+ 			return -3;
+ 		if (get_msr(cpu, MSR_IA32_MPERF, &t->mperf))
+ 			return -4;
++		t->aperf = t->aperf * aperf_mperf_multiplier;
++		t->mperf = t->mperf * aperf_mperf_multiplier;
+ 	}
+ 
+ 	if (do_smi) {
+@@ -1080,14 +1032,17 @@
+ 	if (!(t->flags & CPU_IS_FIRST_THREAD_IN_CORE))
+ 		return 0;
+ 
+-	if (do_nhm_cstates && !do_slm_cstates) {
++	if (do_nhm_cstates && !do_slm_cstates && !do_knl_cstates) {
+ 		if (get_msr(cpu, MSR_CORE_C3_RESIDENCY, &c->c3))
+ 			return -6;
+ 	}
+ 
+-	if (do_nhm_cstates) {
++	if (do_nhm_cstates && !do_knl_cstates) {
+ 		if (get_msr(cpu, MSR_CORE_C6_RESIDENCY, &c->c6))
+ 			return -7;
++	} else if (do_knl_cstates) {
++		if (get_msr(cpu, MSR_KNL_CORE_C6_RESIDENCY, &c->c6))
++			return -7;
+ 	}
+ 
+ 	if (do_snb_cstates)
+@@ -1206,15 +1161,22 @@
+ int amt_pkg_cstate_limits[16] = {PCL__0, PCL__1, PCL__2, PCLRSV, PCLRSV, PCLRSV, PCL__6, PCL__7, PCLRSV, PCLRSV, PCLRSV, PCLRSV, PCLRSV, PCLRSV, PCLRSV, PCLRSV};
+ int phi_pkg_cstate_limits[16] = {PCL__0, PCL__2, PCL_6N, PCL_6R, PCLRSV, PCLRSV, PCLRSV, PCLUNL, PCLRSV, PCLRSV, PCLRSV, PCLRSV, PCLRSV, PCLRSV, PCLRSV, PCLRSV};
+ 
++
++static void
++calculate_tsc_tweak()
++{
++	tsc_tweak = base_hz / tsc_hz;
++}
++
+ static void
+ dump_nhm_platform_info(void)
+ {
+ 	unsigned long long msr;
+ 	unsigned int ratio;
+ 
+-	get_msr(0, MSR_NHM_PLATFORM_INFO, &msr);
++	get_msr(base_cpu, MSR_NHM_PLATFORM_INFO, &msr);
+ 
+-	fprintf(stderr, "cpu0: MSR_NHM_PLATFORM_INFO: 0x%08llx\n", msr);
++	fprintf(stderr, "cpu%d: MSR_NHM_PLATFORM_INFO: 0x%08llx\n", base_cpu, msr);
+ 
+ 	ratio = (msr >> 40) & 0xFF;
+ 	fprintf(stderr, "%d * %.0f = %.0f MHz max efficiency frequency\n",
+@@ -1224,9 +1186,9 @@
+ 	fprintf(stderr, "%d * %.0f = %.0f MHz base frequency\n",
+ 		ratio, bclk, ratio * bclk);
+ 
+-	get_msr(0, MSR_IA32_POWER_CTL, &msr);
+-	fprintf(stderr, "cpu0: MSR_IA32_POWER_CTL: 0x%08llx (C1E auto-promotion: %sabled)\n",
+-		msr, msr & 0x2 ? "EN" : "DIS");
++	get_msr(base_cpu, MSR_IA32_POWER_CTL, &msr);
++	fprintf(stderr, "cpu%d: MSR_IA32_POWER_CTL: 0x%08llx (C1E auto-promotion: %sabled)\n",
++		base_cpu, msr, msr & 0x2 ? "EN" : "DIS");
+ 
+ 	return;
+ }
+@@ -1237,9 +1199,9 @@
+ 	unsigned long long msr;
+ 	unsigned int ratio;
+ 
+-	get_msr(0, MSR_TURBO_RATIO_LIMIT2, &msr);
++	get_msr(base_cpu, MSR_TURBO_RATIO_LIMIT2, &msr);
+ 
+-	fprintf(stderr, "cpu0: MSR_TURBO_RATIO_LIMIT2: 0x%08llx\n", msr);
++	fprintf(stderr, "cpu%d: MSR_TURBO_RATIO_LIMIT2: 0x%08llx\n", base_cpu, msr);
+ 
+ 	ratio = (msr >> 8) & 0xFF;
+ 	if (ratio)
+@@ -1259,9 +1221,9 @@
+ 	unsigned long long msr;
+ 	unsigned int ratio;
+ 
+-	get_msr(0, MSR_TURBO_RATIO_LIMIT1, &msr);
++	get_msr(base_cpu, MSR_TURBO_RATIO_LIMIT1, &msr);
+ 
+-	fprintf(stderr, "cpu0: MSR_TURBO_RATIO_LIMIT1: 0x%08llx\n", msr);
++	fprintf(stderr, "cpu%d: MSR_TURBO_RATIO_LIMIT1: 0x%08llx\n", base_cpu, msr);
+ 
+ 	ratio = (msr >> 56) & 0xFF;
+ 	if (ratio)
+@@ -1311,9 +1273,9 @@
+ 	unsigned long long msr;
+ 	unsigned int ratio;
+ 
+-	get_msr(0, MSR_TURBO_RATIO_LIMIT, &msr);
++	get_msr(base_cpu, MSR_TURBO_RATIO_LIMIT, &msr);
+ 
+-	fprintf(stderr, "cpu0: MSR_TURBO_RATIO_LIMIT: 0x%08llx\n", msr);
++	fprintf(stderr, "cpu%d: MSR_TURBO_RATIO_LIMIT: 0x%08llx\n", base_cpu, msr);
+ 
+ 	ratio = (msr >> 56) & 0xFF;
+ 	if (ratio)
+@@ -1358,16 +1320,77 @@
+ }
+ 
+ static void
++dump_knl_turbo_ratio_limits(void)
++{
++	int cores;
++	unsigned int ratio;
++	unsigned long long msr;
++	int delta_cores;
++	int delta_ratio;
++	int i;
++
++	get_msr(base_cpu, MSR_NHM_TURBO_RATIO_LIMIT, &msr);
++
++	fprintf(stderr, "cpu%d: MSR_NHM_TURBO_RATIO_LIMIT: 0x%08llx\n",
++		base_cpu, msr);
++
++	/**
++	 * Turbo encoding in KNL is as follows:
++	 * [7:0] -- Base value of number of active cores of bucket 1.
++	 * [15:8] -- Base value of freq ratio of bucket 1.
++	 * [20:16] -- +ve delta of number of active cores of bucket 2.
++	 * i.e. active cores of bucket 2 =
++	 * active cores of bucket 1 + delta
++	 * [23:21] -- Negative delta of freq ratio of bucket 2.
++	 * i.e. freq ratio of bucket 2 =
++	 * freq ratio of bucket 1 - delta
++	 * [28:24]-- +ve delta of number of active cores of bucket 3.
++	 * [31:29]-- -ve delta of freq ratio of bucket 3.
++	 * [36:32]-- +ve delta of number of active cores of bucket 4.
++	 * [39:37]-- -ve delta of freq ratio of bucket 4.
++	 * [44:40]-- +ve delta of number of active cores of bucket 5.
++	 * [47:45]-- -ve delta of freq ratio of bucket 5.
++	 * [52:48]-- +ve delta of number of active cores of bucket 6.
++	 * [55:53]-- -ve delta of freq ratio of bucket 6.
++	 * [60:56]-- +ve delta of number of active cores of bucket 7.
++	 * [63:61]-- -ve delta of freq ratio of bucket 7.
++	 */
++	cores = msr & 0xFF;
++	ratio = (msr >> 8) && 0xFF;
++	if (ratio > 0)
++		fprintf(stderr,
++			"%d * %.0f = %.0f MHz max turbo %d active cores\n",
++			ratio, bclk, ratio * bclk, cores);
++
++	for (i = 16; i < 64; i = i + 8) {
++		delta_cores = (msr >> i) & 0x1F;
++		delta_ratio = (msr >> (i + 5)) && 0x7;
++		if (!delta_cores || !delta_ratio)
++			return;
++		cores = cores + delta_cores;
++		ratio = ratio - delta_ratio;
++
++		/** -ve ratios will make successive ratio calculations
++		 * negative. Hence return instead of carrying on.
++		 */
++		if (ratio > 0)
++			fprintf(stderr,
++				"%d * %.0f = %.0f MHz max turbo %d active cores\n",
++				ratio, bclk, ratio * bclk, cores);
++	}
++}
++
++static void
+ dump_nhm_cst_cfg(void)
+ {
+ 	unsigned long long msr;
+ 
+-	get_msr(0, MSR_NHM_SNB_PKG_CST_CFG_CTL, &msr);
++	get_msr(base_cpu, MSR_NHM_SNB_PKG_CST_CFG_CTL, &msr);
+ 
+ #define SNB_C1_AUTO_UNDEMOTE              (1UL << 27)
+ #define SNB_C3_AUTO_UNDEMOTE              (1UL << 28)
+ 
+-	fprintf(stderr, "cpu0: MSR_NHM_SNB_PKG_CST_CFG_CTL: 0x%08llx", msr);
++	fprintf(stderr, "cpu%d: MSR_NHM_SNB_PKG_CST_CFG_CTL: 0x%08llx", base_cpu, msr);
+ 
+ 	fprintf(stderr, " (%s%s%s%s%slocked: pkg-cstate-limit=%d: %s)\n",
+ 		(msr & SNB_C3_AUTO_UNDEMOTE) ? "UNdemote-C3, " : "",
+@@ -1380,6 +1403,49 @@
+ 	return;
+ }
+ 
++static void
++dump_config_tdp(void)
++{
++	unsigned long long msr;
++
++	get_msr(base_cpu, MSR_CONFIG_TDP_NOMINAL, &msr);
++	fprintf(stderr, "cpu%d: MSR_CONFIG_TDP_NOMINAL: 0x%08llx", base_cpu, msr);
++	fprintf(stderr, " (base_ratio=%d)\n", (unsigned int)msr & 0xEF);
++
++	get_msr(base_cpu, MSR_CONFIG_TDP_LEVEL_1, &msr);
++	fprintf(stderr, "cpu%d: MSR_CONFIG_TDP_LEVEL_1: 0x%08llx (", base_cpu, msr);
++	if (msr) {
++		fprintf(stderr, "PKG_MIN_PWR_LVL1=%d ", (unsigned int)(msr >> 48) & 0xEFFF);
++		fprintf(stderr, "PKG_MAX_PWR_LVL1=%d ", (unsigned int)(msr >> 32) & 0xEFFF);
++		fprintf(stderr, "LVL1_RATIO=%d ", (unsigned int)(msr >> 16) & 0xEF);
++		fprintf(stderr, "PKG_TDP_LVL1=%d", (unsigned int)(msr) & 0xEFFF);
++	}
++	fprintf(stderr, ")\n");
++
++	get_msr(base_cpu, MSR_CONFIG_TDP_LEVEL_2, &msr);
++	fprintf(stderr, "cpu%d: MSR_CONFIG_TDP_LEVEL_2: 0x%08llx (", base_cpu, msr);
++	if (msr) {
++		fprintf(stderr, "PKG_MIN_PWR_LVL2=%d ", (unsigned int)(msr >> 48) & 0xEFFF);
++		fprintf(stderr, "PKG_MAX_PWR_LVL2=%d ", (unsigned int)(msr >> 32) & 0xEFFF);
++		fprintf(stderr, "LVL2_RATIO=%d ", (unsigned int)(msr >> 16) & 0xEF);
++		fprintf(stderr, "PKG_TDP_LVL2=%d", (unsigned int)(msr) & 0xEFFF);
++	}
++	fprintf(stderr, ")\n");
++
++	get_msr(base_cpu, MSR_CONFIG_TDP_CONTROL, &msr);
++	fprintf(stderr, "cpu%d: MSR_CONFIG_TDP_CONTROL: 0x%08llx (", base_cpu, msr);
++	if ((msr) & 0x3)
++		fprintf(stderr, "TDP_LEVEL=%d ", (unsigned int)(msr) & 0x3);
++	fprintf(stderr, " lock=%d", (unsigned int)(msr >> 31) & 1);
++	fprintf(stderr, ")\n");
++	
++	get_msr(base_cpu, MSR_TURBO_ACTIVATION_RATIO, &msr);
++	fprintf(stderr, "cpu%d: MSR_TURBO_ACTIVATION_RATIO: 0x%08llx (", base_cpu, msr);
++	fprintf(stderr, "MAX_NON_TURBO_RATIO=%d", (unsigned int)(msr) & 0x7F);
++	fprintf(stderr, " lock=%d", (unsigned int)(msr >> 31) & 1);
++	fprintf(stderr, ")\n");
++}
++
+ void free_all_buffers(void)
+ {
+ 	CPU_FREE(cpu_present_set);
+@@ -1443,12 +1509,41 @@
+ }
+ 
+ /*
+- * cpu_is_first_sibling_in_core(cpu)
+- * return 1 if given CPU is 1st HT sibling in the core
++ * get_cpu_position_in_core(cpu)
++ * return the position of the CPU among its HT siblings in the core
++ * return -1 if the sibling is not in list
+  */
+-int cpu_is_first_sibling_in_core(int cpu)
++int get_cpu_position_in_core(int cpu)
+ {
+-	return cpu == parse_int_file("/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
++	char path[64];
++	FILE *filep;
++	int this_cpu;
++	char character;
++	int i;
++
++	sprintf(path,
++		"/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list",
++		cpu);
++	filep = fopen(path, "r");
++	if (filep == NULL) {
++		perror(path);
++		exit(1);
++	}
++
++	for (i = 0; i < topo.num_threads_per_core; i++) {
++		fscanf(filep, "%d", &this_cpu);
++		if (this_cpu == cpu) {
++			fclose(filep);
++			return i;
++		}
++
++		/* Account for no separator after last thread*/
++		if (i != (topo.num_threads_per_core - 1))
++			fscanf(filep, "%c", &character);
++	}
++
++	fclose(filep);
++	return -1;
+ }
+ 
+ /*
+@@ -1474,25 +1569,31 @@
+ {
+ 	char path[80];
+ 	FILE *filep;
+-	int sib1, sib2;
+-	int matches;
++	int sib1;
++	int matches = 0;
+ 	char character;
++	char str[100];
++	char *ch;
+ 
+ 	sprintf(path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+ 	filep = fopen_or_die(path, "r");
++
+ 	/*
+ 	 * file format:
+-	 * if a pair of number with a character between: 2 siblings (eg. 1-2, or 1,4)
+-	 * otherwinse 1 sibling (self).
++	 * A ',' separated or '-' separated set of numbers
++	 * (eg 1-2 or 1,3,4,5)
+ 	 */
+-	matches = fscanf(filep, "%d%c%d\n", &sib1, &character, &sib2);
++	fscanf(filep, "%d%c\n", &sib1, &character);
++	fseek(filep, 0, SEEK_SET);
++	fgets(str, 100, filep);
++	ch = strchr(str, character);
++	while (ch != NULL) {
++		matches++;
++		ch = strchr(ch+1, character);
++	}
+ 
+ 	fclose(filep);
+-
+-	if (matches == 3)
+-		return 2;
+-	else
+-		return 1;
++	return matches+1;
+ }
+ 
+ /*
+@@ -1656,8 +1757,10 @@
+ void check_dev_msr()
+ {
+ 	struct stat sb;
++	char pathname[32];
+ 
+-	if (stat("/dev/cpu/0/msr", &sb))
++	sprintf(pathname, "/dev/cpu/%d/msr", base_cpu);
++	if (stat(pathname, &sb))
+  		if (system("/sbin/modprobe msr > /dev/null 2>&1"))
+ 			err(-5, "no /dev/cpu/0/msr, Try \"# modprobe msr\" ");
+ }
+@@ -1670,6 +1773,7 @@
+ 	cap_user_data_t cap_data = &cap_data_data;
+ 	extern int capget(cap_user_header_t hdrp, cap_user_data_t datap);
+ 	int do_exit = 0;
++	char pathname[32];
+ 
+ 	/* check for CAP_SYS_RAWIO */
+ 	cap_header->pid = getpid();
+@@ -1684,7 +1788,8 @@
+ 	}
+ 
+ 	/* test file permissions */
+-	if (euidaccess("/dev/cpu/0/msr", R_OK)) {
++	sprintf(pathname, "/dev/cpu/%d/msr", base_cpu);
++	if (euidaccess(pathname, R_OK)) {
+ 		do_exit++;
+ 		warn("/dev/cpu/0/msr open failed, try chown or chmod +r /dev/cpu/*/msr");
+ 	}
+@@ -1717,6 +1822,7 @@
+ int probe_nhm_msrs(unsigned int family, unsigned int model)
+ {
+ 	unsigned long long msr;
++	unsigned int base_ratio;
+ 	int *pkg_cstate_limits;
+ 
+ 	if (!genuine_intel)
+@@ -1725,6 +1831,8 @@
+ 	if (family != 6)
+ 		return 0;
+ 
++	bclk = discover_bclk(family, model);
++
+ 	switch (model) {
+ 	case 0x1A:	/* Core i7, Xeon 5500 series - Bloomfield, Gainstown NHM-EP */
+ 	case 0x1E:	/* Core i7 and i5 Processor - Clarksfield, Lynnfield, Jasper Forest */
+@@ -1766,10 +1874,14 @@
+ 	default:
+ 		return 0;
+ 	}
+-	get_msr(0, MSR_NHM_SNB_PKG_CST_CFG_CTL, &msr);
+-
++	get_msr(base_cpu, MSR_NHM_SNB_PKG_CST_CFG_CTL, &msr);
+ 	pkg_cstate_limit = pkg_cstate_limits[msr & 0xF];
+ 
++	get_msr(base_cpu, MSR_NHM_PLATFORM_INFO, &msr);
++	base_ratio = (msr >> 8) & 0xFF;
++
++	base_hz = base_ratio * bclk * 1000000;
++	has_base_hz = 1;
+ 	return 1;
+ }
+ int has_nhm_turbo_ratio_limit(unsigned int family, unsigned int model)
+@@ -1815,6 +1927,49 @@
+ 	}
+ }
+ 
++int has_knl_turbo_ratio_limit(unsigned int family, unsigned int model)
++{
++	if (!genuine_intel)
++		return 0;
++
++	if (family != 6)
++		return 0;
++
++	switch (model) {
++	case 0x57:	/* Knights Landing */
++		return 1;
++	default:
++		return 0;
++	}
++}
++int has_config_tdp(unsigned int family, unsigned int model)
++{
++	if (!genuine_intel)
++		return 0;
++
++	if (family != 6)
++		return 0;
++
++	switch (model) {
++	case 0x3A:	/* IVB */
++	case 0x3C:	/* HSW */
++	case 0x3F:	/* HSX */
++	case 0x45:	/* HSW */
++	case 0x46:	/* HSW */
++	case 0x3D:	/* BDW */
++	case 0x47:	/* BDW */
++	case 0x4F:	/* BDX */
++	case 0x56:	/* BDX-DE */
++	case 0x4E:	/* SKL */
++	case 0x5E:	/* SKL */
++
++	case 0x57:	/* Knights Landing */
++		return 1;
++	default:
++		return 0;
++	}
++}
++
+ static void
+ dump_cstate_pstate_config_info(family, model)
+ {
+@@ -1832,6 +1987,12 @@
+ 	if (has_nhm_turbo_ratio_limit(family, model))
+ 		dump_nhm_turbo_ratio_limits();
+ 
++	if (has_knl_turbo_ratio_limit(family, model))
++		dump_knl_turbo_ratio_limits();
++
++	if (has_config_tdp(family, model))
++		dump_config_tdp();
++
+ 	dump_nhm_cst_cfg();
+ }
+ 
+@@ -1863,7 +2024,7 @@
+ 	if (get_msr(cpu, MSR_IA32_ENERGY_PERF_BIAS, &msr))
+ 		return 0;
+ 
+-	switch (msr & 0x7) {
++	switch (msr & 0xF) {
+ 	case ENERGY_PERF_BIAS_PERFORMANCE:
+ 		epb_string = "performance";
+ 		break;
+@@ -1987,7 +2148,7 @@
+ 	unsigned long long msr;
+ 
+ 	if (do_rapl & RAPL_PKG_POWER_INFO)
+-		if (!get_msr(0, MSR_PKG_POWER_INFO, &msr))
++		if (!get_msr(base_cpu, MSR_PKG_POWER_INFO, &msr))
+ 			return ((msr >> 0) & RAPL_POWER_GRANULARITY) * rapl_power_units;
+ 
+ 	switch (model) {
+@@ -2012,6 +2173,7 @@
+ 	case 0x3F:	/* HSX */
+ 	case 0x4F:	/* BDX */
+ 	case 0x56:	/* BDX-DE */
++	case 0x57:	/* KNL */
+ 		return (rapl_dram_energy_units = 15.3 / 1000000);
+ 	default:
+ 		return (rapl_energy_units);
+@@ -2053,6 +2215,7 @@
+ 	case 0x3F:	/* HSX */
+ 	case 0x4F:	/* BDX */
+ 	case 0x56:	/* BDX-DE */
++	case 0x57:	/* KNL */
+ 		do_rapl = RAPL_PKG | RAPL_DRAM | RAPL_DRAM_POWER_INFO | RAPL_DRAM_PERF_STATUS | RAPL_PKG_PERF_STATUS | RAPL_PKG_POWER_INFO;
+ 		break;
+ 	case 0x2D:
+@@ -2068,7 +2231,7 @@
+ 	}
+ 
+ 	/* units on package 0, verify later other packages match */
+-	if (get_msr(0, MSR_RAPL_POWER_UNIT, &msr))
++	if (get_msr(base_cpu, MSR_RAPL_POWER_UNIT, &msr))
+ 		return;
+ 
+ 	rapl_power_units = 1.0 / (1 << (msr & 0xF));
+@@ -2393,6 +2556,24 @@
+ 	return 0;
+ }
+ 
++int is_knl(unsigned int family, unsigned int model)
++{
++	if (!genuine_intel)
++		return 0;
++	switch (model) {
++	case 0x57:	/* KNL */
++		return 1;
++	}
++	return 0;
++}
++
++unsigned int get_aperf_mperf_multiplier(unsigned int family, unsigned int model)
++{
++	if (is_knl(family, model))
++		return 1024;
++	return 1;
++}
++
+ #define SLM_BCLK_FREQS 5
+ double slm_freq_table[SLM_BCLK_FREQS] = { 83.3, 100.0, 133.3, 116.7, 80.0};
+ 
+@@ -2402,7 +2583,7 @@
+ 	unsigned int i;
+ 	double freq;
+ 
+-	if (get_msr(0, MSR_FSB_FREQ, &msr))
++	if (get_msr(base_cpu, MSR_FSB_FREQ, &msr))
+ 		fprintf(stderr, "SLM BCLK: unknown\n");
+ 
+ 	i = msr & 0xf;
+@@ -2470,7 +2651,7 @@
+ 	if (!do_nhm_platform_info)
+ 		goto guess;
+ 
+-	if (get_msr(0, MSR_IA32_TEMPERATURE_TARGET, &msr))
++	if (get_msr(base_cpu, MSR_IA32_TEMPERATURE_TARGET, &msr))
+ 		goto guess;
+ 
+ 	target_c_local = (msr >> 16) & 0xFF;
+@@ -2594,6 +2775,9 @@
+ 		}
+ 	}
+ 
++	if (has_aperf)
++		aperf_mperf_multiplier = get_aperf_mperf_multiplier(family, model);
++
+ 	do_nhm_platform_info = do_nhm_cstates = do_smi = probe_nhm_msrs(family, model);
+ 	do_snb_cstates = has_snb_msrs(family, model);
+ 	do_pc2 = do_snb_cstates && (pkg_cstate_limit >= PCL__2);
+@@ -2603,7 +2787,7 @@
+ 	do_c8_c9_c10 = has_hsw_msrs(family, model);
+ 	do_skl_residency = has_skl_msrs(family, model);
+ 	do_slm_cstates = is_slm(family, model);
+-	bclk = discover_bclk(family, model);
++	do_knl_cstates  = is_knl(family, model);
+ 
+ 	rapl_probe(family, model);
+ 	perf_limit_reasons_probe(family, model);
+@@ -2611,6 +2795,9 @@
+ 	if (debug)
+ 		dump_cstate_pstate_config_info();
+ 
++	if (has_skl_msrs(family, model))
++		calculate_tsc_tweak();
++
+ 	return;
+ }
+ 
+@@ -2817,13 +3004,9 @@
+ 
+ 	my_package_id = get_physical_package_id(cpu_id);
+ 	my_core_id = get_core_id(cpu_id);
+-
+-	if (cpu_is_first_sibling_in_core(cpu_id)) {
+-		my_thread_id = 0;
++	my_thread_id = get_cpu_position_in_core(cpu_id);
++	if (!my_thread_id)
+ 		topo.num_cores++;
+-	} else {
+-		my_thread_id = 1;
+-	}
+ 
+ 	init_counter(EVEN_COUNTERS, my_thread_id, my_core_id, my_package_id, cpu_id);
+ 	init_counter(ODD_COUNTERS, my_thread_id, my_core_id, my_package_id, cpu_id);
+@@ -2847,13 +3030,24 @@
+ 	for_all_proc_cpus(initialize_counters);
+ }
+ 
++void set_base_cpu(void)
++{
++	base_cpu = sched_getcpu();
++	if (base_cpu < 0)
++		err(-ENODEV, "No valid cpus found");
++
++	if (debug > 1)
++		fprintf(stderr, "base_cpu = %d\n", base_cpu);
++}
++
+ void turbostat_init()
+ {
++	setup_all_buffers();
++	set_base_cpu();
+ 	check_dev_msr();
+ 	check_permissions();
+ 	process_cpuid();
+ 
+-	setup_all_buffers();
+ 
+ 	if (debug)
+ 		for_all_cpus(print_epb, ODD_COUNTERS);
+@@ -2932,7 +3126,7 @@
+ }
+ 
+ void print_version() {
+-	fprintf(stderr, "turbostat version 4.5 2 Apr, 2015"
++	fprintf(stderr, "turbostat version 4.8 26-Sep, 2015"
+ 		" - Len Brown <lenb@kernel.org>\n");
+ }
+ 
+@@ -2960,7 +3154,7 @@
+ 
+ 	progname = argv[0];
+ 
+-	while ((opt = getopt_long_only(argc, argv, "C:c:Ddhi:JM:m:PpST:v",
++	while ((opt = getopt_long_only(argc, argv, "+C:c:Ddhi:JM:m:PpST:v",
+ 				long_options, &option_index)) != -1) {
+ 		switch (opt) {
+ 		case 'C':

@@ -1,13 +1,13 @@
 Name:		cpupowerutils
-Version:	1.2
-Release:	7%{?dist}
+Version:	1.3
+Release:	1%{?dist}
 Summary:	CPU power management utilities	
 Group:		System Environment/Base
 License:	GPLv2
 URL:		http://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tools/power
 Source0:	cpupowerutils-g650a37f.tar.bz2 
 BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
-BuildRequires:	pciutils-devel, kernel-headers >= 2.6.32-376
+BuildRequires:	pciutils-devel, kernel-headers >= 2.6.32-592
 ExclusiveArch:	%{ix86} x86_64 ppc ppc64
 Conflicts:	cpufrequtils
 %description
@@ -33,6 +33,10 @@ Patch9: cpupowerutils-freq-rounding.patch
 Patch10: cpupowerutils-turbostat-broadwell-support.patch
 Patch11: cpupowerutils-turbostat-rhel7-sync.patch
 Patch12: cpupowerutils-skl.patch
+Patch13: cpupowerutils-turbostat-manpage-update.patch
+Patch14: cpupowerutils-update-to-e98f033f94.patch 
+Patch15: cpupowerutils-turbostat-temp-MSR.patch
+Patch16: uint-max.patch
 
 %description devel
 Header files and libraries to enable development of cpupower utities
@@ -53,8 +57,10 @@ Header files and libraries to enable development of cpupower utities
 # This brings us to commit e7c95ff32d0
 %patch11 -p1 
 %patch12 -p1
-
-
+%patch13 -p1
+%patch14 -p1 
+%patch15 -p1
+%patch16 -p1
 
 %build
 make -C cpupower
@@ -93,6 +99,12 @@ rm -rf %{buildroot}
 %{_libdir}/libcpupower.so
 
 %changelog
+* Tue Jan 19 2016 Jacob Tanenbaum <jtanenba@redhat.com> - 1.3-1
+- Updated package to upstream commit 98f033f94 (bz1283648)
+
+* Fri Nov 20 2015 Neil Horman <nhorman@redhat.com> - 1.2-8
+- Updated man page
+
 * Fri May 22 2015 Neil Horman <nhorman@redhat.com> - 1.2-7
 - Add skylake support
 

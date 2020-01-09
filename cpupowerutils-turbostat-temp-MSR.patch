@@ -1,0 +1,31 @@
+--- power/x86/turbostat/turbostat.c.orig	2016-01-19 13:19:40.246014374 -0500
++++ power/x86/turbostat/turbostat.c	2016-01-19 13:23:24.861700809 -0500
+@@ -42,6 +42,28 @@
+ #include <linux/capability.h>
+ #include <errno.h>
+ 
++#define MSR_TURBO_RATIO_LIMIT		0x000001ad
++#define MSR_TURBO_RATIO_LIMIT1		0x000001ae
++#define MSR_TURBO_RATIO_LIMIT2		0x000001af
++
++#define MSR_CORE_PERF_LIMIT_REASONS	0x00000690
++#define MSR_GFX_PERF_LIMIT_REASONS	0x000006B0
++#define MSR_RING_PERF_LIMIT_REASONS	0x000006B1
++
++#define MSR_PKG_WEIGHTED_CORE_C0_RES	0x00000658
++#define MSR_PKG_ANY_CORE_C0_RES		0x00000659
++#define MSR_PKG_ANY_GFXE_C0_RES		0x0000065A
++#define MSR_PKG_BOTH_CORE_GFXE_C0_RES	0x0000065B
++
++#define MSR_KNL_CORE_C6_RESIDENCY	0x000003ff
++
++#define MSR_CONFIG_TDP_LEVEL_1		0x00000649
++#define MSR_CONFIG_TDP_LEVEL_2		0x0000064A
++#define MSR_CONFIG_TDP_CONTROL		0x0000064B
++#define MSR_TURBO_ACTIVATION_RATIO	0x0000064C
++
++#define MSR_CONFIG_TDP_NOMINAL		0x00000648
++
+ 
+ char *proc_stat = "/proc/stat";
+ unsigned int interval_sec = 5;

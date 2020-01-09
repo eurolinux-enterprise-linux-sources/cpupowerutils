@@ -1,0 +1,12 @@
+diff -up ./cpupower/utils/cpufreq-info.c.orig ./cpupower/utils/cpufreq-info.c
+--- ./cpupower/utils/cpufreq-info.c.orig	2016-01-19 12:25:40.957996537 -0500
++++ ./cpupower/utils/cpufreq-info.c	2016-01-19 12:27:43.686453978 -0500
+@@ -10,7 +10,7 @@
+ #include <errno.h>
+ #include <stdlib.h>
+ #include <string.h>
+-
++#include <limits.h>
+ #include <getopt.h>
+ 
+ #include "cpufreq.h"
