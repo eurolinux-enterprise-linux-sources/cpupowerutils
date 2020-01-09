@@ -1,6 +1,6 @@
 Name:		cpupowerutils
 Version:	1.2
-Release:	1%{?dist}.1
+Release:	5%{?dist}
 Summary:	CPU power management utilities	
 Group:		System Environment/Base
 License:	GPLv2
@@ -29,6 +29,8 @@ Patch5: cpupowerutils-turbostat-update1.patch
 Patch6: cpupowerutils-haswell-c8_c9_c10.patch
 Patch7: cpupowerutils-turbostat-energystatus.patch
 Patch8: cpupowerutils-turbostat-rapl-fix.patch
+Patch9: cpupowerutils-freq-rounding.patch
+Patch10: cpupowerutils-turbostat-broadwell-support.patch
 
 %description devel
 Header files and libraries to enable development of cpupower utities
@@ -44,6 +46,8 @@ Header files and libraries to enable development of cpupower utities
 %patch6 -p1
 %patch7 -p1
 %patch8 -p1
+%patch9 -p1
+%patch10 -p1
 
 %build
 make -C cpupower
@@ -82,9 +86,17 @@ rm -rf %{buildroot}
 %{_libdir}/libcpupower.so
 
 %changelog
-* Tue Apr 22 2014 Neil Horman <nhorman@redhat.com> 1.2-1.1
+* Fri Jun 27 2014 Neil Horman <nhorman@redhat.com>  1.2-5
+- Added Broadwell support (bz 1093513)
+
+* Fri Jun 13 2014 Neil Horman <nhorman@redhat.com> 1.2-4
+- Fixed cpufreq rounding error (bz 1109187)
+
+* Tue Mar 25 2014 Neil Horman <nhorman@redhat.com> 1.2-3
 - Fixed wildcatpass error message (bz 1056310)
 - Fixed rapl register reads (bz 1080631
+
+* Wed Nov 27 2013 Neil Horman <nhorman@redhat.com> 1.2-2
 - Enalbed haswell power states (bz 1008033)
 
 * Mon Apr 29 2013 Neil Horman <nhorman@redhat.com> 1.2-1
